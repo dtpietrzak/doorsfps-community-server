@@ -1,0 +1,27 @@
+# Runs in the public repo only. In the private monorepo this file sits under
+# server-community/ and GitHub ignores it.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund && npm run build
+        working-directory: bots/spec
+      - run: deno task types
+      - run: deno task lint
+      - run: deno task check:imports
+      - run: deno task test

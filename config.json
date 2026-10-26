@@ -1,0 +1,10 @@
+{
+  "maxPlayers": 8,
+  "matchDurationSeconds": 900,
+  "password": "",
+  "bots": {
+    "autofillBots": 4,
+    "difficulty": "easy",
+    "noBotsOnEmptyServer": true
+  }
+}
