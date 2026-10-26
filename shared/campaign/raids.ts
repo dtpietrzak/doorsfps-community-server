@@ -7,18 +7,32 @@
  */
 
 import { RAID_RESPAWN_DELAY_MS as GAME_RAID_RESPAWN_DELAY_MS } from "../sim/game.ts";
+import {
+  isRaidOnlyMapName,
+  RAID_BREEZEWAY_MAX_TIME_SECONDS,
+  RAID_DEFAULT_MAX_TIME_SECONDS,
+  RAID_DOOR_GOAL,
+  RAID_FIRST_ID,
+  RAID_MIDWAY_MAX_TIME_SECONDS,
+  RAID_TERMINAL_MAX_TIME_SECONDS,
+  RAID_WIN_REWARD,
+  RAIDS,
+} from "./raidCatalog.ts";
+
+export {
+  isRaidOnlyMapName,
+  RAID_BREEZEWAY_MAX_TIME_SECONDS,
+  RAID_DEFAULT_MAX_TIME_SECONDS,
+  RAID_DOOR_GOAL,
+  RAID_FIRST_ID,
+  RAID_MIDWAY_MAX_TIME_SECONDS,
+  RAID_TERMINAL_MAX_TIME_SECONDS,
+  RAID_WIN_REWARD,
+  RAIDS,
+};
 
 export const RAID_MIN_PLAYERS = 2;
 export const RAID_MAX_PLAYERS = 4;
-export const RAID_DOOR_GOAL = 10;
-/** Fallback when a catalog row omits a time limit. */
-export const RAID_DEFAULT_MAX_TIME_SECONDS = 4 * 60;
-/** Playtest guesses — Breezeway 10 same-map doors. */
-export const RAID_BREEZEWAY_MAX_TIME_SECONDS = 4 * 60;
-/** Playtest guesses — Midway two maps, agents, bosses. */
-export const RAID_MIDWAY_MAX_TIME_SECONDS = 5 * 60;
-/** Playtest guesses — Terminal seven maps + mixed finale. */
-export const RAID_TERMINAL_MAX_TIME_SECONDS = 6 * 60;
 /** First raid party to assemble holds the occupancy this long to invite, vote, and Let's Go. */
 export const RAID_ASSEMBLE_LOCK_SECONDS = 5 * 60;
 /** Safety cap while a holder is allocating / in-match (released on party complete). */
@@ -27,7 +41,6 @@ export const RAID_PLAYING_LOCK_SECONDS = 45 * 60;
 export const RAID_AFK_MAX_MS = 60_000;
 /** Spectate / respawn countdown while a teammate is still up. */
 export const RAID_RESPAWN_DELAY_MS = GAME_RAID_RESPAWN_DELAY_MS;
-export const RAID_WIN_REWARD = { xp: 15, coins: 15 } as const;
 /** Failed co-op raids sit on game-over, then return everyone to the menu. */
 export const RAID_FAIL_RETURN_SECONDS = 60;
 /** Win sit so XP shows, then the exclusive slot is released. */
@@ -91,7 +104,7 @@ export type RaidRound = {
   miniEncounter?: RaidMiniEncounter;
 };
 
-type RaidDefinition = {
+export type RaidDefinition = {
   id: string;
   title: string;
   raidNumber: number;
@@ -104,155 +117,9 @@ type RaidDefinition = {
   nextRaidId: string | null;
 };
 
-export const RAIDS = [
-  {
-    id: "crossroads",
-    title: "Breezeway",
-    raidNumber: 1,
-    map: "Crossroads",
-    rounds: [
-      { map: "Crossroads" },
-      { map: "Crossroads" },
-      { map: "Crossroads" },
-      { map: "Crossroads" },
-      { map: "Crossroads" },
-      { map: "Crossroads" },
-      { map: "Crossroads" },
-      { map: "Crossroads" },
-      { map: "Crossroads" },
-      { map: "Crossroads" },
-    ],
-    doorGoal: RAID_DOOR_GOAL,
-    maxTimeSeconds: RAID_BREEZEWAY_MAX_TIME_SECONDS,
-    reward: RAID_WIN_REWARD,
-    nextRaidId: "cornfield-levels",
-  },
-  {
-    id: "cornfield-levels",
-    title: "Midway",
-    raidNumber: 2,
-    map: "Cornfield",
-    rounds: [
-      { map: "Cornfield" },
-      { map: "Cornfield" },
-      { map: "Cornfield" },
-      { map: "Cornfield" },
-      {
-        map: "Cornfield",
-        agentEncounter: { count: 2, delaySeconds: 5 },
-      },
-      { map: "Levels" },
-      { map: "Levels" },
-      { map: "Levels" },
-      {
-        map: "Levels",
-        agentEncounter: { count: 3, delaySeconds: 0 },
-      },
-      {
-        map: "Levels",
-        bossEncounter: {
-          count: 2,
-          maxHealth: 200,
-          scale: 1.3,
-          moveSpeedScale: 0.65,
-        },
-      },
-    ],
-    doorGoal: RAID_DOOR_GOAL,
-    maxTimeSeconds: RAID_MIDWAY_MAX_TIME_SECONDS,
-    reward: RAID_WIN_REWARD,
-    nextRaidId: "maze",
-  },
-  {
-    id: "maze",
-    title: "Terminal",
-    raidNumber: 3,
-    map: "Raid02-00",
-    rounds: [
-      {
-        map: "Raid02-00",
-        normalBots: 2,
-        normalBonusAtThreePlus: 1,
-      },
-      {
-        map: "Raid02-01",
-        normalBots: 4,
-        normalBonusAtThreePlus: 1,
-      },
-      {
-        map: "Raid02-02",
-        normalBots: 4,
-        normalBonusAtThreePlus: 1,
-        agentEncounter: { count: 2, delaySeconds: 5 },
-      },
-      {
-        map: "Raid02-03",
-        normalBots: 2,
-        normalBonusAtThreePlus: 1,
-        miniEncounter: {
-          count: 2,
-          maxHealth: 20,
-          scale: 0.8,
-          moveSpeedScale: 1.3,
-          countBonusAtFourPlus: 1,
-        },
-      },
-      {
-        map: "Raid02-04",
-        normalBots: 4,
-        normalBonusAtThreePlus: 1,
-        miniEncounter: {
-          count: 2,
-          maxHealth: 20,
-          scale: 0.8,
-          moveSpeedScale: 1.3,
-          countBonusAtFourPlus: 1,
-        },
-      },
-      {
-        map: "Raid02-05",
-        normalBots: 4,
-        normalBonusAtThreePlus: 1,
-        agentEncounter: { count: 3, delaySeconds: 0 },
-        miniEncounter: {
-          count: 4,
-          maxHealth: 20,
-          scale: 0.8,
-          moveSpeedScale: 1.3,
-          countBonusAtFourPlus: 1,
-        },
-      },
-      {
-        map: "Raid02-06",
-        normalBots: 4,
-        normalBonusAtThreePlus: 1,
-        miniEncounter: {
-          count: 4,
-          maxHealth: 20,
-          scale: 0.8,
-          moveSpeedScale: 1.3,
-          countBonusAtFourPlus: 1,
-        },
-        bossEncounter: {
-          count: 2,
-          maxHealth: 200,
-          scale: 1.3,
-          moveSpeedScale: 0.65,
-          countBonusAtFourPlus: 1,
-        },
-      },
-    ],
-    doorGoal: 7,
-    maxTimeSeconds: RAID_TERMINAL_MAX_TIME_SECONDS,
-    reward: RAID_WIN_REWARD,
-    nextRaidId: null,
-  },
-] as const satisfies readonly RaidDefinition[];
-
 export type Raid = (typeof RAIDS)[number];
 export type RaidId = Raid["id"];
 
-export const RAID_FIRST_ID: RaidId = "crossroads";
 
 /** Occupancy modeId used by placement / inventory. Not an OfficialModeId. */
 export const RAID_OCCUPANCY_MODE_ID = "raid" as const;
@@ -264,11 +131,6 @@ export function isRaidOccupancyModeId(value: unknown): value is "raid" {
 export function isRaidTeamId(value: unknown): value is RaidTeamId {
   return typeof value === "string" &&
     (RAID_TEAM_IDS as readonly string[]).includes(value);
-}
-
-/** Raid02-* maps are raid-only and must not appear in community map votes. */
-export function isRaidOnlyMapName(name: string): boolean {
-  return /^Raid02-\d+$/i.test(name.trim());
 }
 
 export function isRaidId(value: unknown): value is RaidId {

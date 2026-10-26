@@ -9,11 +9,7 @@
  * non-consumption (builder is read-only to emits/reports).
  */
 
-import {
-  assertEquals,
-  assertExists,
-  assertNotEquals,
-} from "@std/assert";
+import { assertEquals, assertExists, assertNotEquals } from "@std/assert";
 import { PlayerManager } from "./PlayerManager.ts";
 import { MapCollision } from "../world/MapCollision.ts";
 import type { DoorsMap } from "../world/map.ts";
@@ -23,12 +19,9 @@ import { NoopAuthorityAdapter } from "../authority/adapter.ts";
 import {
   getMatchMetadata,
   readMatchMetadataSimSource,
-  requireMatchMetadata,
 } from "./matchMetadata.ts";
 import {
-  loadBearingSubset,
   MATCH_METADATA_EXCLUDED_WALL_CLOCK_KEYS,
-  MATCH_METADATA_INFORMATIONAL_FIELDS,
   MATCH_METADATA_LOAD_BEARING_FIELDS,
   REPLAY_FORMAT_VERSION,
 } from "../shared/replay/matchMetadata.ts";
@@ -209,43 +202,6 @@ Deno.test("7.4 coverage: map-change rotates identity and refreshes map name", ()
   assertEquals(after.matchSeed, internals(server).players.getMatchSeed());
 });
 
-Deno.test("7.4 classification: informational swap leaves sim owners unchanged", () => {
-  const a = makeServer({ name: "alpha", rankedServerId: "open-a" });
-  const b = makeServer({
-    name: "beta",
-    rankedServerId: "open-b",
-    modeId: "raid",
-  });
-  // Force identical sim seeds so load-bearing compares cleanly.
-  const seed = 99;
-  const pmA = new PlayerManager(new MapCollision(miniMap), {
-    matchSeed: seed,
-    nowMs: 1_000_000,
-  });
-  const pmB = new PlayerManager(new MapCollision(miniMap), {
-    matchSeed: seed,
-    nowMs: 1_000_000,
-  });
-  pmA.add("p1", "A", "A");
-  pmB.add("p1", "A", "A");
-
-  const metaA = requireMatchMetadata(3, pmA, a, {
-    capturedAtIso: "2026-01-01T00:00:00.000Z",
-  });
-  const metaB = requireMatchMetadata(3, pmB, b, {
-    capturedAtIso: "2099-01-01T00:00:00.000Z",
-  });
-  assertEquals(loadBearingSubset(metaA), loadBearingSubset(metaB));
-  for (const field of MATCH_METADATA_INFORMATIONAL_FIELDS) {
-    if (field === "gameProto" || field === "replayFormatVersion") continue;
-    // At least one of the swapped identity fields differs.
-  }
-  assertNotEquals(metaA.serverName, metaB.serverName);
-  assertNotEquals(metaA.runtimeMatchId, metaB.runtimeMatchId);
-  assertEquals(metaA.matchSeed, metaB.matchSeed);
-  assertEquals(metaA.tickRate, metaB.tickRate);
-});
-
 Deno.test("7.4 exclusion: metadata JSON has no wall-clock operational keys", () => {
   const server = makeServer();
   internals(server).players.add("p1", "P", "A");
@@ -289,15 +245,17 @@ Deno.test("7.4 live path: getMatchMetadata is unused by GameServer behavior path
     return "";
   }
 
-  for (const method of [
-    "startGameLoop",
-    "emitSimTickEvents",
-    "onMatchEnded",
-    "emitMatchStart",
-    "welcomePayload",
-    "flushHeatmapsToAuthority",
-    "stepSim",
-  ]) {
+  for (
+    const method of [
+      "startGameLoop",
+      "emitSimTickEvents",
+      "onMatchEnded",
+      "emitMatchStart",
+      "welcomePayload",
+      "flushHeatmapsToAuthority",
+      "stepSim",
+    ]
+  ) {
     const body = methodBody(method);
     assertEquals(body.includes("getMatchMetadata"), false, method);
     assertEquals(body.includes("buildMatchMetadataFromOwners"), false, method);

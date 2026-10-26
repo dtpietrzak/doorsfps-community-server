@@ -166,6 +166,7 @@ import {
   RAID_FAIL_RETURN_SECONDS,
   RAID_LOAD_TIMEOUT_PARTY_BLOCK_MS,
   RAID_WIN_RETURN_SECONDS,
+  RAIDS,
 } from "../shared/campaign/raids.ts";
 
 /** Round tick timing fields for JSON (keep payload small / stable). */
@@ -801,6 +802,12 @@ export class GameServer implements ReplayIntegrationSinkHandle {
       this.hostChannel?.send(event);
     });
     if (this.isRaidRuntime()) {
+      // The public community build ships an empty raid catalog.
+      if ((RAIDS as readonly unknown[]).length === 0) {
+        throw new Error(
+          "Raid mode is not available in the community server. Unset DOORS_MODE_ID and RANKED_SERVER_ID.",
+        );
+      }
       this.bots.setRaidMode(true);
       this.players.setRaidDoorPolicy("idle");
     }

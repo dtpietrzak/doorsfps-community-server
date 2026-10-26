@@ -6,7 +6,8 @@
  *     doors-server[.exe]
  *     config.json
  *     TERMS.md
- *     maps/*.doors.json   (competitive + raid, flattened; campaign maps are client-only)
+ *     README.md           (run instructions; source is scripts/download-readme.md)
+ *     maps/*.doors.json   (competitive pool only; raid and campaign maps never ship)
  *
  * Usage (from server/):
  *   deno task package
@@ -18,10 +19,10 @@ const ROOT = new URL("..", import.meta.url);
 const DIST = new URL("dist/", ROOT);
 const MAP_POOLS = [
   new URL("maps/competitive/", ROOT),
-  new URL("maps/raid/", ROOT),
 ];
 const CONFIG = new URL("config.json", ROOT);
 const TERMS = new URL("TERMS.md", ROOT);
+const DOWNLOAD_README = new URL("scripts/download-readme.md", ROOT);
 /** game/client/public/downloads/ — one level up from server/, then into client. */
 const CLIENT_DOWNLOADS = new URL("../client/public/downloads/", ROOT);
 const STAGING = new URL("dist/.package-staging/", ROOT);
@@ -191,6 +192,7 @@ async function packageBundle(bundle: PlatformBundle): Promise<string | null> {
 
   await Deno.copyFile(pathFromUrl(CONFIG), `${doorsDir}/config.json`);
   await Deno.copyFile(pathFromUrl(TERMS), `${doorsDir}/TERMS.md`);
+  await Deno.copyFile(pathFromUrl(DOWNLOAD_README), `${doorsDir}/README.md`);
   for (const pool of MAP_POOLS) {
     await copyMapPool(pathFromUrl(pool), mapsDest);
   }

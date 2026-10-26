@@ -129,7 +129,10 @@ Deno.test("lifecycle guards: forceDraw schedules no restart", () => {
   assertEquals(over.restartInSeconds, 0);
   assertEquals(pm.isRestartDue(100), false);
   assertEquals(pm.isRestartDue(100 + MATCH_RESTART_SECONDS * TICK_HZ), false);
-  assertEquals(pm.maybeRestartMatch(100 + MATCH_RESTART_SECONDS * TICK_HZ), null);
+  assertEquals(
+    pm.maybeRestartMatch(100 + MATCH_RESTART_SECONDS * TICK_HZ),
+    null,
+  );
 });
 
 Deno.test("lifecycle guards: forceEndMatch defaults to no rematch", () => {
@@ -175,13 +178,17 @@ Deno.test("lifecycle restart: ranked re-enters prematch; open goes live", () => 
   const ranked = makePrematch();
   startRankedLive(ranked, 5);
   // Schedule restart via forceEndMatch (score/time use same endMatch).
-  assertExists(ranked.forceEndMatch(20, "A", { scheduleRestart: true, restartSeconds: 1 }));
+  assertExists(
+    ranked.forceEndMatch(20, "A", { scheduleRestart: true, restartSeconds: 1 }),
+  );
   const due = 20 + TICK_HZ;
   assertEquals(ranked.maybeRestartMatch(due)?.phase, "prematch");
   assertEquals(ranked.getMatchPhase(), "prematch");
 
   const open = makeOpen();
-  assertExists(open.forceEndMatch(20, "B", { scheduleRestart: true, restartSeconds: 1 }));
+  assertExists(
+    open.forceEndMatch(20, "B", { scheduleRestart: true, restartSeconds: 1 }),
+  );
   assertEquals(open.maybeRestartMatch(20 + TICK_HZ)?.phase, "live");
   assertEquals(open.getMatchPhase(), "live");
 });
@@ -338,42 +345,6 @@ Deno.test("lifecycle edge: release-drain hold starts nothing (finishIntermission
   assertEquals(internals.players.isMatchOver(), true);
 });
 
-Deno.test("lifecycle edge: raid activate rotates; idle reset does not", () => {
-  const map = { ...miniMap, name: "Crossroads" };
-  const server = new GameServer({
-    name: "lifecycle-raid-id",
-    port: 0,
-    host: "127.0.0.1",
-    map,
-    collision: new MapCollision(map),
-    autofillBots: 0,
-    noBotsOnEmptyServer: true,
-    joinMode: "open",
-    rankedServerId: "raid",
-    modeId: "raid",
-    authorityAdapter: new NoopAuthorityAdapter(),
-  });
-  const internals = server as unknown as {
-    runtimeMatchId: string;
-    activateRaidFromJoin(input: {
-      team?: "A" | "B";
-      raidId?: string;
-      partySize?: number;
-    }): void;
-    resetIdleRaidRuntime(): void;
-  };
-  const bootId = internals.runtimeMatchId;
-  internals.activateRaidFromJoin({ team: "A", raidId: "crossroads", partySize: 2 });
-  const raidId = internals.runtimeMatchId;
-  assertNotEquals(raidId, bootId);
-
-  internals.resetIdleRaidRuntime();
-  assertEquals(internals.runtimeMatchId, raidId); // keep until next activate
-
-  internals.activateRaidFromJoin({ team: "A", raidId: "crossroads", partySize: 2 });
-  assertNotEquals(internals.runtimeMatchId, raidId);
-});
-
 Deno.test("lifecycle identity: ready-start rotates via handleMatchReady path", () => {
   const server = new GameServer({
     name: "lifecycle-ready-id",
@@ -428,7 +399,11 @@ Deno.test("lifecycle source-scan: beginRuntimeMatchIdentity call sites are exhau
   const calls = countMatches(src, /this\.beginRuntimeMatchIdentity\s*\(/);
   // Definition + 5 call sites: changeMap, handleMatchReady, activateRaidFromJoin,
   // finishIntermission map-vote, finishIntermission same-map.
-  assertEquals(calls, 5, `expected 5 beginRuntimeMatchIdentity calls, got ${calls}`);
+  assertEquals(
+    calls,
+    5,
+    `expected 5 beginRuntimeMatchIdentity calls, got ${calls}`,
+  );
   assertMatch(src, /changeMap[\s\S]*?beginRuntimeMatchIdentity/);
   assertMatch(src, /handleMatchReady[\s\S]*?beginRuntimeMatchIdentity/);
   assertMatch(src, /activateRaidFromJoin[\s\S]*?beginRuntimeMatchIdentity/);

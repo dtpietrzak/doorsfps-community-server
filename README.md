@@ -1,5 +1,7 @@
 # Community server
 
+[Play Doors](https://doorsfps.com/) · [Docs](https://docs.doorsfps.com/) · [Hosting guide](https://docs.doorsfps.com/play/hosting)
+
 `server-community` is the authoritative match process for Doors. Official hosts run this same program. You can run it yourself and invite friends: they get a door-capture match, a join password, guest names, and whatever maps you put on disk.
 
 Matches here stay on this machine. They do not write XP, Skill, coins, or cards, and the public server list never shows them. Friends type the address and password you send them.
@@ -44,7 +46,7 @@ deno task dev -- --port 3001 --name "Friday night"
 | `--accept-terms` | Accept [TERMS.md](TERMS.md) without the prompt. Same as `DOORS_ACCEPT_TERMS=1`. |
 | `-h, --help` | Print the built-in help. |
 
-Startup also reads `env-vars/.env.development` when that file exists. A variable already exported in the shell wins over the file. For a custom server, leave `SERVER_JOIN_MODE`, `RANKED_SERVER_ID`, and `DOORS_MODE_ID` unset. Setting one of them to `easy`, `medium`, `hard`, or `raid` turns this process into an official runtime, and guest joins stop working. Leave `DOORS_BOT_THINK_RUNTIME` unset (or `pipeline-js`) so bots think inside this process.
+Startup also reads `env-vars/.env.development` when that file exists. A variable already exported in the shell wins over the file. For a custom server, leave `SERVER_JOIN_MODE`, `RANKED_SERVER_ID`, and `DOORS_MODE_ID` unset. Setting one of them to `easy`, `medium`, or `hard` turns this process into an official runtime, and guest joins stop working. Leave `DOORS_BOT_THINK_RUNTIME` unset (or `pipeline-js`) so bots think inside this process.
 
 ## Run a downloaded build
 
@@ -55,10 +57,11 @@ doors/
   doors-server      (doors-server.exe on Windows)
   config.json
   TERMS.md
+  README.md         (run steps, incl. the macOS unsigned-binary workaround)
   maps/*.doors.json
 ```
 
-Set `password` in that `config.json`, then run the binary from that folder. On macOS or Linux, `chmod +x doors-server` first. The binary looks for `config.json` and `maps/` next to itself, then in the current directory.
+Set `password` in that `config.json`, then run the binary from that folder. On macOS or Linux, `chmod +x doors-server` first. The binary is not code signed yet, so on macOS also run `xattr -d com.apple.quarantine doors-server` (the packaged `README.md` covers this and the Windows SmartScreen prompt; its source is `scripts/download-readme.md`). The binary looks for `config.json` and `maps/` next to itself, then in the current directory.
 
 To produce that zip from source, after `npm ci`:
 
@@ -137,15 +140,15 @@ Discovery uses the first directory that actually contains maps:
 Two layouts work:
 
 - **Flat.** `*.doors.json` files sitting directly in that folder. The downloadable zip is flat. When any flat file is present, the pool folders below are left alone.
-- **Pools**, which is how this folder is laid out. `maps/competitive/` and `maps/raid/` are both loaded. Campaign maps ship with the game client; this server never loads them. `maps/README.md` has the pool list.
+- **Pools**, which is how this folder is laid out. `maps/competitive/` is loaded. Campaign maps ship with the game client; this server never loads them. `maps/README.md` has the pool list.
 
 A custom arena saved as `maps/MyArena.doors.json` therefore **replaces** the pooled rotation, because the flat files win. To add a map and keep the shipped arenas, put the file in `maps/competitive/` when you run from source. On a binary, copy it into the flat `maps/` folder next to the arenas you want to keep.
 
 The catalog is read once at boot. Adding a file means restarting. `map <name>` in the console switches among maps already loaded.
 
-Names that look like `Raid02-<number>` are wave maps. A custom server can load them and then leaves them out of the end-of-match vote. Put arena names (`Pillars`, `Courtyard`, and the rest of `maps/competitive/`) in `map` and `mapRotation` for a normal rotation.
+Put arena names (`Pillars`, `Courtyard`, and the rest of `maps/competitive/`) in `map` and `mapRotation` for a normal rotation.
 
-A raid match, with waves and a shared goal, runs when this process is the official raid runtime (`DOORS_MODE_ID=raid`). A custom server plays every loaded map as a door-capture arena.
+A custom server plays every loaded map as a door-capture arena.
 
 ## Console
 
@@ -198,7 +201,6 @@ The door cycle lives in `shared/sim/game.ts`. Doors stay open for 30 seconds, an
 | `bots/spec/` | The bot protocol, its types and codec, and an example brain. |
 | `bots/conformance/` | The check to run against your own brain. |
 | `shared/` | Game rules the server and the game client both run: `sim/`, `world/`, `net/`, `replay/`, `math/`, and the rest. |
-| `raid/` | Wave matches, used when this process is the raid runtime. |
 | `replay/` | Match recording. A custom server has no authority store, so recording never opens. |
 | `heatmaps/` | Walk samples taken during the match. Official hosts upload the batch. On a custom server the upload is skipped and the samples are dropped at the end of the match. |
 | `authority/` | Join-token checks and the HTTP client official hosts use for match reports. A custom server loads no signing keys and uses `NoopAuthorityAdapter`, which writes nothing. |
@@ -208,7 +210,7 @@ The door cycle lives in `shared/sim/game.ts`. Doors stay open for 30 seconds, an
 
 ## Your own fill bots
 
-With `bots.brain` omitted or set to `"builtin"`, fill bots, the balance filler, grey agents, and raid waves all think inside this process. That is the setup to use for a normal server.
+With `bots.brain` omitted or set to `"builtin"`, fill bots, the balance filler, and grey agents all think inside this process. That is the setup to use for a normal server.
 
 To drive fill and balance from your own program, set `brain` to a command array. The first string is the executable. The rest are arguments.
 
@@ -218,7 +220,7 @@ To drive fill and balance from your own program, set `brain` to a command array.
 
 The server spawns it with stdin and stdout piped and speaks bot protocol 5: hello, load the map, synchronize the roster, then a think batch whenever those pawns are due. Each batch is one world snapshot plus the pawns scheduled for this tick (each pawn is due 20 times a second). The reply is one action per requested pawn, applied 150 ms later. A late, garbled, or mismatched reply is dropped, and those pawns keep their previous keys. If the child exits, the server starts it again, waiting 1 second and doubling up to 30 seconds. The 60 Hz sim never waits for it.
 
-Grey agents and raid waves stay on the built-in brain. The brain never writes health, position, or score.
+Grey agents stay on the built-in brain. The brain never writes health, position, or score.
 
 - [`bots/spec/README.md`](bots/spec/README.md) is the protocol: messages, schedule, every field, and the byte layout.
 - `bots/spec/examples/walk_to_door.py` is a complete brain in about 150 lines of standard-library Python. It holds W toward the enemy door.

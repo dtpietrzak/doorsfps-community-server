@@ -13,7 +13,10 @@ import type { DoorsMap } from "../world/map.ts";
 import { certificateSha256, writeSelfSignedDevTls } from "../host/tlsDev.ts";
 import { decodeGamePacket, GAME_PROTO } from "../shared/net/index.ts";
 import { JoinErrors, NetEvents, TICK_HZ } from "../protocol/network.ts";
-import { encodeAuthFrame, StreamFrameReader } from "../transport/webTransportFrame.ts";
+import {
+  encodeAuthFrame,
+  StreamFrameReader,
+} from "../transport/webTransportFrame.ts";
 
 const miniMap: DoorsMap = {
   name: "tls-test",
@@ -55,7 +58,10 @@ function makeServer(tls?: { cert: string; key: string } | null): GameServer {
 
 Deno.test("parseBotThinkRuntimeMode names Deno-compiled child hosts", () => {
   assertEquals(parseBotThinkRuntimeMode(undefined), "pipeline-js");
-  assertEquals(parseBotThinkRuntimeMode("pipeline-compiled"), "pipeline-compiled");
+  assertEquals(
+    parseBotThinkRuntimeMode("pipeline-compiled"),
+    "pipeline-compiled",
+  );
   assertEquals(
     parseBotThinkRuntimeMode("pipeline-compiled-shadow"),
     "pipeline-compiled-shadow",
@@ -64,64 +70,14 @@ Deno.test("parseBotThinkRuntimeMode names Deno-compiled child hosts", () => {
     parseBotThinkRuntimeMode("pipeline-compiled-deno"),
     "pipeline-compiled-deno",
   );
-  assertEquals(parseBotThinkRuntimeMode("compiled-deno"), "pipeline-compiled-deno");
+  assertEquals(
+    parseBotThinkRuntimeMode("compiled-deno"),
+    "pipeline-compiled-deno",
+  );
   assertEquals(
     parseBotThinkRuntimeMode("pipeline-compiled-deno-shadow"),
     "pipeline-compiled-deno-shadow",
   );
-});
-
-Deno.test("GameServer gives every raid session a fresh reward identity", () => {
-  const map = { ...miniMap, name: "Crossroads" };
-  const server = new GameServer({
-    name: "raid-identity-test",
-    port: 0,
-    host: "127.0.0.1",
-    map,
-    collision: new MapCollision(map),
-    autofillBots: 0,
-    noBotsOnEmptyServer: true,
-    joinMode: "open",
-    rankedServerId: "raid",
-    modeId: "raid",
-    authorityAdapter: new NoopAuthorityAdapter(),
-  });
-  const internals = server as unknown as {
-    runtimeMatchId: string;
-    lastReportedMatchKey: string | null;
-    lastHeatmapReportKey: string | null;
-    activateRaidFromJoin(input: {
-      team?: "A" | "B";
-      raidId?: string;
-      partySize?: number;
-    }): void;
-    resetIdleRaidRuntime(): void;
-  };
-
-  const processIdentity = internals.runtimeMatchId;
-  internals.lastReportedMatchKey = "previous-report";
-  internals.lastHeatmapReportKey = "previous-heatmap";
-  internals.activateRaidFromJoin({
-    team: "A",
-    raidId: "crossroads",
-    partySize: 2,
-  });
-  const firstRaidIdentity = internals.runtimeMatchId;
-  assertNotEquals(firstRaidIdentity, processIdentity);
-  assertEquals(internals.lastReportedMatchKey, null);
-  assertEquals(internals.lastHeatmapReportKey, null);
-
-  internals.lastReportedMatchKey = "first-raid-report";
-  internals.lastHeatmapReportKey = "first-raid-heatmap";
-  internals.resetIdleRaidRuntime();
-  internals.activateRaidFromJoin({
-    team: "A",
-    raidId: "crossroads",
-    partySize: 2,
-  });
-  assertNotEquals(internals.runtimeMatchId, firstRaidIdentity);
-  assertEquals(internals.lastReportedMatchKey, null);
-  assertEquals(internals.lastHeatmapReportKey, null);
 });
 
 Deno.test("intermission map-vote switch changes the map", () => {
@@ -136,7 +92,13 @@ Deno.test("intermission map-vote switch changes the map", () => {
     collision: collisionA,
     mapPath: "vote-a",
     mapCatalog: [
-      { name: "VoteA", stem: "VoteA", path: "vote-a", map: mapA, collision: collisionA },
+      {
+        name: "VoteA",
+        stem: "VoteA",
+        path: "vote-a",
+        map: mapA,
+        collision: collisionA,
+      },
       {
         name: "VoteB",
         stem: "VoteB",
@@ -199,194 +161,6 @@ Deno.test("stop cancels a pending admission bot reconcile timer", async () => {
   // Deno's op sanitizer also fails this test if the timer is still pending.
   assertEquals(internals.admissionBotReconcileTimer, null);
   assertEquals(internals.admissionBotPendingParties.size, 0);
-});
-
-Deno.test("same-tick human and bot captures fail the raid (dealer wins)", () => {
-  const map = { ...miniMap, name: "Crossroads" };
-  const server = new GameServer({
-    name: "raid-same-tick",
-    port: 0,
-    host: "127.0.0.1",
-    map,
-    collision: new MapCollision(map),
-    autofillBots: 0,
-    noBotsOnEmptyServer: true,
-    joinMode: "open",
-    rankedServerId: "raid",
-    modeId: "raid",
-    authorityAdapter: new NoopAuthorityAdapter(),
-  });
-  const internals = server as unknown as {
-    raid: { tryStart(n: number): boolean; ended: boolean; failReason: string | null };
-    players: PlayerManager;
-    handleRaidScores(scores: { team: "A" | "B" }[]): { winner: string } | null;
-    activateRaidFromJoin(input: {
-      team?: "A" | "B";
-      raidId?: string;
-      partySize?: number;
-    }): void;
-  };
-  internals.activateRaidFromJoin({
-    team: "A",
-    raidId: "crossroads",
-    partySize: 2,
-  });
-  assertEquals(internals.raid.tryStart(2), true);
-  internals.players.setRaidDoorPolicy("open");
-  const over = internals.handleRaidScores([{ team: "A" }, { team: "B" }]);
-  assertEquals(over?.winner, "B");
-  assertEquals(internals.raid.ended, true);
-  assertEquals(internals.raid.failReason, "enemy_capture");
-});
-
-function raidLoadGateServer(name: string) {
-  const map = { ...miniMap, name: "Crossroads" };
-  const server = new GameServer({
-    name,
-    port: 0,
-    host: "127.0.0.1",
-    map,
-    collision: new MapCollision(map),
-    autofillBots: 0,
-    noBotsOnEmptyServer: true,
-    joinMode: "open",
-    rankedServerId: "raid",
-    modeId: "raid",
-    authorityAdapter: new NoopAuthorityAdapter(),
-  });
-  const internals = server as unknown as {
-    raid: { started: boolean; activatedAtMs: number } | null;
-    players: PlayerManager;
-    sessions: { emit(...args: unknown[]): void; get(id: string): undefined };
-    raidLoadedPlayerIds: Set<string>;
-    handleRaidFailConditions(): unknown;
-    raidPartyTimedOut(partyId: string | undefined): boolean;
-    activateRaidFromJoin(input: {
-      team?: "A" | "B";
-      raidId?: string;
-      partySize?: number;
-    }): void;
-  };
-  internals.sessions = { emit: () => {}, get: () => undefined };
-  internals.activateRaidFromJoin({
-    team: "A",
-    raidId: "crossroads",
-    partySize: 2,
-  });
-  const partyOpts = { partyId: "party-1", partySize: 2 };
-  internals.players.add("p1", "Alpha", "A", partyOpts);
-  internals.players.add("p2", "Bravo", "A", partyOpts);
-  return internals;
-}
-
-Deno.test("raid holds doors until every party member has loaded the map", () => {
-  const internals = raidLoadGateServer("raid-load-gate");
-  // Both connected, nobody loaded: still holding.
-  internals.handleRaidFailConditions();
-  assertEquals(internals.raid?.started, false);
-  internals.raidLoadedPlayerIds.add("p1");
-  internals.handleRaidFailConditions();
-  assertEquals(internals.raid?.started, false);
-  internals.raidLoadedPlayerIds.add("p2");
-  internals.handleRaidFailConditions();
-  assertEquals(internals.raid?.started, true);
-});
-
-Deno.test("raid kicks the whole party when someone has not loaded after the wait", () => {
-  const internals = raidLoadGateServer("raid-load-timeout");
-  internals.raidLoadedPlayerIds.add("p1");
-  internals.raid!.activatedAtMs = Date.now() - 119_000;
-  internals.handleRaidFailConditions();
-  assertEquals(internals.raid?.started, false);
-  assertEquals(internals.players.humanCount(), 2);
-
-  internals.raid!.activatedAtMs = Date.now() - 121_000;
-  internals.handleRaidFailConditions();
-  assertEquals(internals.raid, null);
-  assertEquals(internals.players.humanCount(), 0);
-  assertEquals(internals.raidLoadedPlayerIds.size, 0);
-  // A straggler's old token cannot reopen the idled slot alone.
-  assertEquals(internals.raidPartyTimedOut("party-1"), true);
-  assertEquals(internals.raidPartyTimedOut("party-2"), false);
-});
-
-Deno.test("raid match state is recorded in metadata identity and checkpoints (notes/replay.md §29.2)", () => {
-  const map = { ...miniMap, name: "Crossroads" };
-  const server = new GameServer({
-    name: "raid-recording-test",
-    port: 0,
-    host: "127.0.0.1",
-    map,
-    collision: new MapCollision(map),
-    autofillBots: 0,
-    noBotsOnEmptyServer: true,
-    joinMode: "open",
-    rankedServerId: "raid",
-    modeId: "raid",
-    authorityAdapter: new NoopAuthorityAdapter(),
-  });
-  const internals = server as unknown as {
-    players: PlayerManager;
-    activateRaidFromJoin(input: {
-      team?: "A" | "B";
-      raidId?: string;
-      partySize?: number;
-    }): void;
-  };
-
-  // Off-raid: both recording surfaces report the inactive sentinel, never null.
-  const offIdentity = server.getMatchMetadataIdentity();
-  assertEquals(offIdentity.raidMatch, { active: false });
-  internals.players.drainAuthoritativeEvents();
-  const offCheckpoint = server.captureCheckpoint(internals.players.tick);
-  assertEquals(offCheckpoint.match.raid, { active: false });
-
-  internals.activateRaidFromJoin({
-    team: "A",
-    raidId: "crossroads",
-    partySize: 2,
-  });
-
-  const identity = server.getMatchMetadataIdentity();
-  const raidMatch = identity.raidMatch;
-  assertEquals(raidMatch.active, true);
-  if (!raidMatch.active) return;
-  assertEquals(raidMatch.raidId, "crossroads");
-  assertEquals(raidMatch.humanTeam, "A");
-  assertEquals(raidMatch.started, false);
-  assertEquals(raidMatch.wave, 0);
-  assertEquals(raidMatch.failReason, null);
-  assertEquals(raidMatch.expectedHumans >= 2, true);
-
-  // MatchMetadata (the recorded initial-state half) carries the same state.
-  const meta = server.requireMatchMetadata(internals.players.tick, {
-    capturedAtIso: "2026-01-01T00:00:00.000Z",
-  });
-  assertEquals(meta.raidMatch, raidMatch);
-
-  internals.players.drainAuthoritativeEvents();
-  const checkpoint = server.captureCheckpoint(internals.players.tick);
-  const cpRaid = checkpoint.match.raid;
-  assertEquals(cpRaid.active, true);
-  if (!cpRaid.active) return;
-  assertEquals(cpRaid.started, false);
-  assertEquals(cpRaid.wave, 0);
-  assertEquals(cpRaid.failReason, null);
-
-  // Wave/started state changes (tryStart) are reflected live, not cached.
-  internals.players.add("p1", "Alpha", "A");
-  internals.players.add("p2", "Bravo", "A");
-  const started = (server as unknown as {
-    raid: { tryStart(n: number): boolean };
-  }).raid.tryStart(2);
-  assertEquals(started, true);
-
-  internals.players.drainAuthoritativeEvents();
-  const afterStart = server.captureCheckpoint(internals.players.tick).match.raid;
-  assertEquals(afterStart.active, true);
-  if (!afterStart.active) return;
-  assertEquals(afterStart.started, true);
-  assertEquals(afterStart.wave, 1);
 });
 
 Deno.test("empty live ranked reset flushes actual heatmap stats then clears them", () => {
@@ -598,8 +372,14 @@ Deno.test("GameServer HTTP: /api/status has tls=false and stays joinable", async
     assertEquals(body.tickRate, TICK_HZ);
     assertEquals(body.tickTiming?.tickHz, TICK_HZ);
     assertEquals(typeof body.tickTiming?.skippedDeficitTicks, "number");
-    assertEquals((body as { passwordRequired?: boolean }).passwordRequired, true);
-    assertEquals((body as { protocolVersion?: number }).protocolVersion, GAME_PROTO);
+    assertEquals(
+      (body as { passwordRequired?: boolean }).passwordRequired,
+      true,
+    );
+    assertEquals(
+      (body as { protocolVersion?: number }).protocolVersion,
+      GAME_PROTO,
+    );
   } finally {
     await server.stop();
   }
