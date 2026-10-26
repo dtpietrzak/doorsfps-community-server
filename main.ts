@@ -27,6 +27,7 @@ import {
   TERMS_VERSION,
 } from "./host/termsGate.ts";
 import { resolveHostAddresses } from "./host/hostInfo.ts";
+import { SERVER_VERSION } from "./host/version.ts";
 import {
   COMMUNITY_JOIN_PASSWORD_REQUIRED,
   getConfigPathCandidates,
@@ -103,7 +104,7 @@ function parseArgs(args: string[]): {
 
 function printCliHelp(): void {
   console.log(`
-Doors game server
+Doors game server ${SERVER_VERSION}
 
 Usage:
   doors-server [options]
@@ -263,6 +264,7 @@ async function main() {
     Deno.exit(0);
   }
 
+  console.log(`Doors server ${SERVER_VERSION}`);
   const termsAcceptance = requireTermsAcceptance(Deno.args);
   console.log(
     `Terms of Use ${TERMS_VERSION} accepted (${
@@ -525,7 +527,7 @@ async function main() {
     } else {
       // Non-interactive (piped / service): log once and stay up.
       console.log(
-        `Doors server running · ${name} · ${mapBundle.map.name} · ${host}:${port}`,
+        `Doors server ${SERVER_VERSION} running · ${name} · ${mapBundle.map.name} · ${host}:${port}`,
       );
       if (publicIp && host !== "127.0.0.1" && host !== "localhost") {
         console.log(`Public IP: ${publicIp}:${port}`);

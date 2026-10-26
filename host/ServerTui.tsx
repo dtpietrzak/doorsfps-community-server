@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import type { GameServer } from "../runtime/GameServer.ts";
 import { volatileDropPct } from "../transport/poseHeartbeat.ts";
+import { SERVER_VERSION } from "./version.ts";
 import type { MapBundle } from "../world/loadMap.ts";
 import { loadMapBundle } from "../world/loadMap.ts";
 
@@ -442,7 +443,7 @@ export function ServerTui({ gameServer, maps, host, initialMapPath }: Props) {
         width={72}
       >
         <Text bold color="cyan">
-          DOORS · {gameServer.getName()}
+          DOORS {SERVER_VERSION} · {gameServer.getName()}
         </Text>
         <Text>
           Map: <Text color="green">{mapName}</Text>{"  "}Players:{" "}
