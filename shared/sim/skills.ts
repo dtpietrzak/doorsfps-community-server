@@ -227,6 +227,17 @@ const TIER_COST_MULT: Record<SkillTier, number> = {
   3: 4,
 };
 
+/**
+ * Starter skills: tier I is free (level lock only). The authority grants each
+ * one when the player first reaches its level and drops it into this loadout
+ * slot (0 = slot 1). Higher tiers keep the normal price.
+ */
+export const STARTER_SKILL_SLOTS: Readonly<Partial<Record<SkillId, number>>> = {
+  quick: 0,
+  bullets: 1,
+  selfHeal: 2,
+};
+
 type SkillBase = {
   category: SkillCategoryId;
   label: string;
@@ -496,7 +507,9 @@ function buildProduct(skill: SkillId, tier: SkillTier): SkillProductDef {
     tier,
     label: `${base.label} ${TIER_ROMAN[tier]}`,
     minLevel,
-    coinCost: base.coinCost * TIER_COST_MULT[tier],
+    coinCost: tier === 1 && STARTER_SKILL_SLOTS[skill] != null
+      ? 0
+      : base.coinCost * TIER_COST_MULT[tier],
     requires: tier === 1 ? null : productIdFor(skill, (tier - 1) as SkillTier),
     value,
     valueUnit: base.valueUnit,
@@ -753,8 +766,36 @@ export function canPurchaseSkillProduct(
 ): boolean {
   if (!isSkillProductId(id)) return false;
   if (!isSkillProductCombatReady(id)) return false;
-  if (coinCostForSkillProduct(id) <= 0) return false;
+  if (coinCostForSkillProduct(id) <= 0 && !isStarterSkillProduct(id)) {
+    return false;
+  }
   return canUnlockSkillProduct(id, level, owned);
+}
+
+/** Tier I of a {@link STARTER_SKILL_SLOTS} skill (free, auto-granted). */
+export function isStarterSkillProduct(id: SkillProductId | string): boolean {
+  if (!isSkillProductId(id)) return false;
+  const product = SKILL_PRODUCTS[id];
+  return product.tier === 1 && STARTER_SKILL_SLOTS[product.skill] != null;
+}
+
+/**
+ * Starter products the player has reached the level for but does not own
+ * yet, in {@link STARTER_SKILL_SLOTS} order.
+ */
+export function starterSkillsDueAtLevel(
+  level: number,
+  owned: readonly SkillProductId[] | null | undefined,
+): SkillProductId[] {
+  const out: SkillProductId[] = [];
+  for (const skill of Object.keys(STARTER_SKILL_SLOTS) as SkillId[]) {
+    const id = productIdFor(skill, 1);
+    if (isSkillProductOwned(id, owned)) continue;
+    if (!isSkillProductCombatReady(id)) continue;
+    if (!isSkillProductLevelUnlocked(id, level)) continue;
+    out.push(id);
+  }
+  return out;
 }
 
 /** JSON string for the players.owned_abilities column (full skill product set). */
@@ -1169,6 +1210,29 @@ export function defaultSkillLoadout(
     out[i] = skill;
     i++;
     if (i >= SKILL_LOADOUT_SLOTS) break;
+  }
+  return out;
+}
+
+/**
+ * Drop newly granted starter skills into their {@link STARTER_SKILL_SLOTS}
+ * slot. A taken slot falls back to the first empty one; a full bar or a skill
+ * already equipped is left alone. `owned` must include the new grants.
+ */
+export function withStarterSkillsSlotted(
+  loadout: readonly SkillLoadoutSlot[],
+  granted: readonly SkillProductId[],
+  owned: readonly SkillProductId[] | null | undefined,
+): SkillLoadout {
+  const out = normalizeSkillLoadout(loadout, owned);
+  for (const id of granted) {
+    if (!isStarterSkillProduct(id)) continue;
+    const skill = SKILL_PRODUCTS[id].skill;
+    if (out.includes(skill)) continue;
+    const preferred = STARTER_SKILL_SLOTS[skill]!;
+    const slot = out[preferred] == null ? preferred : out.indexOf(null);
+    if (slot < 0) continue;
+    out[slot] = skill;
   }
   return out;
 }

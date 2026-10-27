@@ -220,14 +220,14 @@ Deno.test("tier unlock catalog: levels + escalating costs (skills source)", () =
   assertEquals(minLevelForAbility("quick"), 2);
   assertEquals(minLevelForAbility("quick2"), 6);
   assertEquals(minLevelForAbility("quick3"), 10);
-  assertEquals(coinCostForAbility("quick"), 25);
+  assertEquals(coinCostForAbility("quick"), 0);
   assertEquals(coinCostForAbility("quick2"), 50);
   assertEquals(coinCostForAbility("quick3"), 100);
   // Bullets
   assertEquals(minLevelForAbility("bullets"), 3);
   assertEquals(minLevelForAbility("bullets2"), 6);
   assertEquals(minLevelForAbility("bullets3"), 10);
-  assertEquals(coinCostForAbility("bullets"), 40);
+  assertEquals(coinCostForAbility("bullets"), 0);
   assertEquals(coinCostForAbility("bullets2"), 80);
   assertEquals(coinCostForAbility("bullets3"), 160);
   // Glitch (tree node after Quick)
@@ -323,7 +323,7 @@ Deno.test("shop gates: level, prerequisite tier, tree chain, coins own", () => {
   );
   assertEquals(
     abilityLockMessage("quick", 5, []),
-    "Buy Quick I in Profile (25 coins)",
+    "Unlock Quick I in Profile (free)",
   );
   assertEquals(abilityLockMessage("quick", 5, ["quick"]), null);
   assertEquals(

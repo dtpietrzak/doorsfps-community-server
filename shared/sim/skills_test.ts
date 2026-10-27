@@ -9,6 +9,9 @@ import {
   SKILL_LOADOUT_SLOTS,
   INSTANT_SKILL_LOCK_S,
   availableSkillsForLoadoutSlot,
+  isStarterSkillProduct,
+  starterSkillsDueAtLevel,
+  withStarterSkillsSlotted,
   canAddSkillToLoadout,
   canPurchaseSkillProduct,
   canUnlockSkillProduct,
@@ -369,10 +372,11 @@ Deno.test("skillProductId helper", () => {
 
 Deno.test("coin costs: classic four + tree; tiers 1× / 2× / 4×", () => {
   // Classic timed four (single catalog in skills.ts).
-  assertEquals(coinCostForSkillProduct("quick"), 25);
+  // Starter tier I is free (STARTER_SKILL_SLOTS); higher tiers keep the curve.
+  assertEquals(coinCostForSkillProduct("quick"), 0);
   assertEquals(coinCostForSkillProduct("quick2"), 50);
   assertEquals(coinCostForSkillProduct("quick3"), 100);
-  assertEquals(coinCostForSkillProduct("bullets"), 40);
+  assertEquals(coinCostForSkillProduct("bullets"), 0);
   assertEquals(coinCostForSkillProduct("bullets2"), 80);
   assertEquals(coinCostForSkillProduct("bullets3"), 160);
   assertEquals(coinCostForSkillProduct("glitch"), 50);
@@ -386,7 +390,7 @@ Deno.test("coin costs: classic four + tree; tiers 1× / 2× / 4×", () => {
   assertEquals(coinCostForSkillProduct("rewind"), 75);
   assertEquals(coinCostForSkillProduct("rewind2"), 150);
   assertEquals(coinCostForSkillProduct("teleport"), 100);
-  assertEquals(coinCostForSkillProduct("selfHeal"), 30);
+  assertEquals(coinCostForSkillProduct("selfHeal"), 0);
   assertEquals(coinCostForSkillProduct("selfHeal2"), 60);
   assertEquals(coinCostForSkillProduct("teamHeal"), 50);
   assertEquals(coinCostForSkillProduct("leech"), 70);
@@ -399,9 +403,68 @@ Deno.test("coin costs: classic four + tree; tiers 1× / 2× / 4×", () => {
 
   for (const id of SKILL_PRODUCT_ORDER) {
     const p = SKILL_PRODUCTS[id];
-    assertEquals(p.coinCost > 0, true, `${id} coinCost`);
+    assertEquals(p.coinCost > 0, !isStarterSkillProduct(id), `${id} coinCost`);
     assertEquals(p.coinCost, coinCostForSkillProduct(id));
   }
+});
+
+Deno.test("starter skills: free tier I, purchasable, due by level", () => {
+  assertEquals(isStarterSkillProduct("quick"), true);
+  assertEquals(isStarterSkillProduct("bullets"), true);
+  assertEquals(isStarterSkillProduct("selfHeal"), true);
+  assertEquals(isStarterSkillProduct("quick2"), false);
+  assertEquals(isStarterSkillProduct("glitch"), false);
+  assertEquals(isStarterSkillProduct("nope"), false);
+
+  // Free does not mean blocked: the buy path still works as a claim.
+  assertEquals(canPurchaseSkillProduct("quick", 2, []), true);
+  assertEquals(canPurchaseSkillProduct("quick", 1, []), false);
+
+  // Levels: Quick 2, Bullets 3, Self heal 4.
+  assertEquals(starterSkillsDueAtLevel(1, []), []);
+  assertEquals(starterSkillsDueAtLevel(2, []), ["quick"]);
+  assertEquals(starterSkillsDueAtLevel(3, ["quick"]), ["bullets"]);
+  assertEquals(starterSkillsDueAtLevel(20, []), ["quick", "bullets", "selfHeal"]);
+  assertEquals(starterSkillsDueAtLevel(20, ["quick", "bullets", "selfHeal"]), []);
+});
+
+Deno.test("withStarterSkillsSlotted: fixed slots, fallback, never twice", () => {
+  const all = ["quick", "bullets", "selfHeal", "glitch"] as const;
+  // Fresh bar: Quick 1, Bullets 2, Self heal 3.
+  assertEquals(
+    withStarterSkillsSlotted(emptySkillLoadout(), ["quick", "bullets", "selfHeal"], [...all]),
+    ["quick", "bullets", "selfHeal", null],
+  );
+  // One at a time (level-ups) lands in the same slots.
+  let bar = withStarterSkillsSlotted(emptySkillLoadout(), ["quick"], ["quick"]);
+  assertEquals(bar, ["quick", null, null, null]);
+  bar = withStarterSkillsSlotted(bar, ["bullets"], ["quick", "bullets"]);
+  assertEquals(bar, ["quick", "bullets", null, null]);
+  // Taken slot falls back to the first empty one.
+  assertEquals(
+    withStarterSkillsSlotted(["glitch", null, null, null], ["quick"], [...all]),
+    ["glitch", "quick", null, null],
+  );
+  // Already equipped elsewhere: left alone.
+  assertEquals(
+    withStarterSkillsSlotted([null, null, null, "quick"], ["quick"], [...all]),
+    [null, null, null, "quick"],
+  );
+  // Full bar: not added.
+  assertEquals(
+    withStarterSkillsSlotted(["glitch", "hawkeyes", "rewind", "teleport"], ["quick"], [
+      ...all,
+      "hawkeyes",
+      "rewind",
+      "teleport",
+    ]),
+    ["glitch", "hawkeyes", "rewind", "teleport"],
+  );
+  // Non-starter grants are ignored.
+  assertEquals(
+    withStarterSkillsSlotted(emptySkillLoadout(), ["glitch"], [...all]),
+    emptySkillLoadout(),
+  );
 });
 
 Deno.test("canPurchaseSkillProduct gates combat-ready + tree prereqs", () => {

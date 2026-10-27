@@ -702,6 +702,7 @@ export function abilityLockMessage(
     const prevSkill = SKILL_DEFS[skillDef.requiresSkill];
     return `Buy ${prevSkill.label} I first`;
   }
+  if (product.coinCost === 0) return `Unlock ${product.label} in Profile (free)`;
   return `Buy ${product.label} in Profile (${product.coinCost} coins)`;
 }
 
