@@ -168,10 +168,10 @@ export function withPlayerObstacles(
       return base.hasHeadroom(x, z, feetY, headY, radius);
     },
     floorYAt: base.floorYAt
-      ? (x, z) => base.floorYAt!(x, z)
+      ? (x, z, feetY?) => base.floorYAt!(x, z, feetY)
       : undefined,
     ceilingYAt: base.ceilingYAt
-      ? (x, z) => base.ceilingYAt!(x, z)
+      ? (x, z, feetY?) => base.ceilingYAt!(x, z, feetY)
       : undefined,
   };
 }

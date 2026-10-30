@@ -100,10 +100,14 @@ export type MoveCollision = {
     headY?: number,
     radius?: number,
   ): boolean;
-  /** Optional elevated floor used by local set dressing such as platforms. */
-  floorYAt?: (x: number, z: number) => number | null;
-  /** Optional low ceiling used by local set dressing. */
-  ceilingYAt?: (x: number, z: number) => number | null;
+  /**
+   * Optional elevated floor used by local set dressing such as platforms.
+   * `feetY` (the mover's feet, standing stance) lets a world with storeys
+   * pick the floor under them rather than the one above.
+   */
+  floorYAt?: (x: number, z: number, feetY?: number) => number | null;
+  /** Optional low ceiling used by local set dressing; `feetY` as `floorYAt`. */
+  ceilingYAt?: (x: number, z: number, feetY?: number) => number | null;
 };
 
 /**
@@ -570,8 +574,8 @@ export function stepMove(
   const groundEye = moveEyeHeight(s.crouch);
   s.velocityY -= MOVE_GRAVITY * dt;
   s.y += s.velocityY * dt;
-  const elevatedFloorY = max(0, collision.floorYAt?.(s.x, s.z) ?? 0);
   const standFeetY = s.y - moveEyeHeight(false);
+  const elevatedFloorY = max(0, collision.floorYAt?.(s.x, s.z, standFeetY) ?? 0);
   // Crouch flag with standing-eye Y (repredict / seed mismatch): snap to
   // crouch eye instead of falling ~0.26s from stand height every restamp.
   // Only while already grounded — a crouch-jump apex has vy≈0 and must fall.
@@ -596,7 +600,7 @@ export function stepMove(
     s.onGround = false;
   }
 
-  const ceilingY = collision.ceilingYAt?.(s.x, s.z);
+  const ceilingY = collision.ceilingYAt?.(s.x, s.z, s.y - groundEye);
   if (ceilingY !== null && ceilingY !== undefined) {
     const headY = s.y - groundEye + moveCollisionHeight(s.crouch);
     if (headY > ceilingY) {
