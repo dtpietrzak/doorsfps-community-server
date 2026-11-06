@@ -108,6 +108,11 @@ export type MoveCollision = {
   floorYAt?: (x: number, z: number, feetY?: number) => number | null;
   /** Optional low ceiling used by local set dressing; `feetY` as `floorYAt`. */
   ceilingYAt?: (x: number, z: number, feetY?: number) => number | null;
+  /**
+   * The world goes below y 0, and `floorYAt` may answer with a negative floor
+   * (the campaign city's sewer). Unset, y 0 is solid ground, as in every match.
+   */
+  belowGround?: boolean;
 };
 
 /**
@@ -575,7 +580,8 @@ export function stepMove(
   s.velocityY -= MOVE_GRAVITY * dt;
   s.y += s.velocityY * dt;
   const standFeetY = s.y - moveEyeHeight(false);
-  const elevatedFloorY = max(0, collision.floorYAt?.(s.x, s.z, standFeetY) ?? 0);
+  const reportedFloorY = collision.floorYAt?.(s.x, s.z, standFeetY) ?? 0;
+  const elevatedFloorY = collision.belowGround ? reportedFloorY : max(0, reportedFloorY);
   // Crouch flag with standing-eye Y (repredict / seed mismatch): snap to
   // crouch eye instead of falling ~0.26s from stand height every restamp.
   // Only while already grounded — a crouch-jump apex has vy≈0 and must fall.
@@ -592,7 +598,7 @@ export function stepMove(
     s.y = elevatedFloorY + groundEye;
     s.velocityY = 0;
     s.onGround = true;
-  } else if (s.y <= groundEye) {
+  } else if (!collision.belowGround && s.y <= groundEye) {
     s.y = groundEye;
     s.velocityY = 0;
     s.onGround = true;
@@ -610,7 +616,7 @@ export function stepMove(
   }
 
   // Horizontal collision after vertical so jump apex can clear half-walls.
-  const feetY = max(0, s.y - groundEye);
+  const feetY = collision.belowGround ? s.y - groundEye : max(0, s.y - groundEye);
   const headY = feetY + moveCollisionHeight(s.crouch);
   const resolved = collision.resolvePosition(s.x, s.z, undefined, feetY, headY);
   s.x = resolved.x;

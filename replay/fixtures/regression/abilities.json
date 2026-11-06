@@ -1,0 +1,238 @@
+{
+  "map": {
+    "name": "regression-abilities",
+    "version": 1
+  },
+  "match": {
+    "debugForceDoorsOpen": false,
+    "doorCycleOriginTick": 0,
+    "doorsPowerUpUntilTick": null,
+    "inPrematch": false,
+    "matchDurationTicks": 3600,
+    "matchEndTick": 3600,
+    "matchOver": false,
+    "raid": {
+      "active": false
+    },
+    "raidDoorPolicy": "off",
+    "restartAtTick": null,
+    "scores": {
+      "A": 0,
+      "B": 0
+    }
+  },
+  "matchSeed": 6150,
+  "players": [
+    {
+      "abilityBarRegenEndsAtTick": null,
+      "abilityDoorRegenEndsAtTick": null,
+      "abilityEndsAtTick": {
+        "quick": 153
+      },
+      "abilityFxOrigin": {},
+      "abilityGlobalLockEndsAtTick": 153,
+      "abilityNoSpendOnEnd": {},
+      "abilitySpent": {},
+      "alive": true,
+      "crouch": false,
+      "deaths": 0,
+      "diedAtTick": null,
+      "enemyDoorSinceTick": null,
+      "equipment": {
+        "body": 0,
+        "bulletHue": 0,
+        "crosshair": 0,
+        "crosshairColor": -1,
+        "gunHue": 0,
+        "head": 0,
+        "hue": 0,
+        "leg": 0,
+        "nameHue": 0,
+        "pistol": 0,
+        "rifle": 0,
+        "scope": 0,
+        "shotgun": 0,
+        "shoulder": 0,
+        "visor": 0
+      },
+      "health": 100,
+      "hitSlowEndsAtTick": 0,
+      "hitSlowStacks": 0,
+      "id": "h1",
+      "isAgent": false,
+      "isBot": false,
+      "kills": 0,
+      "lastLandedAtTick": null,
+      "lastMeleeAtTick": null,
+      "lastShotAtTick": null,
+      "maxHealth": 100,
+      "onGround": false,
+      "ownedAbilities": null,
+      "pausedReloadRemainingTicks": {},
+      "pitch": 0,
+      "poseHistory": [
+        {
+          "crouch": false,
+          "landingAmount": 0,
+          "onGround": true,
+          "pitch": 0,
+          "slide": false,
+          "tick": 0,
+          "velocityX": 0,
+          "velocityY": 0,
+          "velocityZ": 0,
+          "x": -39.28476530214964,
+          "y": 1.5084066999260404,
+          "yaw": -2.3497492108990774,
+          "z": -38.772283063222716
+        },
+        {
+          "crouch": false,
+          "landingAmount": 0,
+          "onGround": false,
+          "pitch": 0,
+          "slide": false,
+          "tick": 1,
+          "velocityX": 0,
+          "velocityY": -0.3333333333333333,
+          "velocityZ": 0,
+          "x": 0,
+          "y": 1.5944444444444446,
+          "yaw": 0,
+          "z": 0
+        },
+        {
+          "crouch": false,
+          "landingAmount": 0,
+          "onGround": false,
+          "pitch": 0,
+          "slide": false,
+          "tick": 2,
+          "velocityX": 0,
+          "velocityY": -0.3333333333333333,
+          "velocityZ": 0,
+          "x": 0,
+          "y": 1.5944444444444446,
+          "yaw": 0,
+          "z": 0
+        },
+        {
+          "crouch": false,
+          "landingAmount": 0,
+          "onGround": false,
+          "pitch": 0,
+          "slide": false,
+          "tick": 3,
+          "velocityX": 0,
+          "velocityY": -0.3333333333333333,
+          "velocityZ": 0,
+          "x": 0,
+          "y": 1.5944444444444446,
+          "yaw": 0,
+          "z": 0
+        },
+        {
+          "crouch": false,
+          "landingAmount": 0,
+          "onGround": false,
+          "pitch": 0,
+          "slide": false,
+          "tick": 4,
+          "velocityX": 0,
+          "velocityY": -0.3333333333333333,
+          "velocityZ": 0,
+          "x": 0,
+          "y": 1.5944444444444446,
+          "yaw": 0,
+          "z": 0
+        },
+        {
+          "crouch": false,
+          "landingAmount": 0,
+          "onGround": false,
+          "pitch": 0,
+          "slide": false,
+          "tick": 5,
+          "velocityX": 0,
+          "velocityY": -0.3333333333333333,
+          "velocityZ": 0,
+          "x": 0,
+          "y": 1.5944444444444446,
+          "yaw": 0,
+          "z": 0
+        },
+        {
+          "crouch": false,
+          "landingAmount": 0,
+          "onGround": false,
+          "pitch": 0,
+          "slide": false,
+          "tick": 6,
+          "velocityX": 0,
+          "velocityY": -0.3333333333333333,
+          "velocityZ": 0,
+          "x": 0,
+          "y": 1.5944444444444446,
+          "yaw": 0,
+          "z": 0
+        }
+      ],
+      "prevInputCrouch": false,
+      "reloadEndsAtTick": null,
+      "score": 0,
+      "skillLoadout": [
+        "quick",
+        null,
+        null,
+        null
+      ],
+      "slideDirX": 0,
+      "slideDirZ": 0,
+      "slideForceCrouch": false,
+      "slideRemaining": 0,
+      "spawnedAtTick": 0,
+      "sprintStamina": 1,
+      "team": "A",
+      "unlimitedAmmo": false,
+      "velocityX": 0,
+      "velocityY": 0,
+      "velocityZ": 0,
+      "weaponId": 0,
+      "weaponLoadouts": [
+        {
+          "ammoInMag": 7,
+          "spareClips": 2,
+          "weaponId": 0
+        },
+        {
+          "ammoInMag": 3,
+          "spareClips": 2,
+          "weaponId": 1
+        },
+        {
+          "ammoInMag": 5,
+          "chambered": true,
+          "spareClips": 10,
+          "weaponId": 2
+        }
+      ],
+      "weaponSwitchEndsAtTick": null,
+      "x": 0,
+      "xp": 0,
+      "y": 1.6,
+      "yaw": 0,
+      "z": 0
+    }
+  ],
+  "projectiles": [],
+  "rng": {
+    "agents": 2799987975,
+    "collisionSpawn": 456391528,
+    "damage": 3567712263,
+    "spawn": 456391528,
+    "spread": 1536079110
+  },
+  "runtimeMatchId": "regression-abilities",
+  "schemaVersion": 1,
+  "tick": 6
+}

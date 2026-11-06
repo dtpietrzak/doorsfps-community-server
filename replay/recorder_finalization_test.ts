@@ -16,9 +16,6 @@ import { GameServer } from "../runtime/GameServer.ts";
 import { NoopAuthorityAdapter } from "../authority/adapter.ts";
 import { MapCollision } from "../world/MapCollision.ts";
 import type { DoorsMap } from "../world/map.ts";
-import type { SimTickResult } from "../players/simTickResult.ts";
-import { drainTickAuthoritativeEvents } from "../players/authoritativeEventSource.ts";
-import type { AuthoritativeEvent } from "../shared/sim/authoritativeEvent.ts";
 import { REPLAY_FORMAT_VERSION } from "../shared/replay/matchMetadata.ts";
 import {
   InMemoryReplayLifecycleClient,
@@ -38,6 +35,7 @@ import {
   wireReplayRecorder,
   type WireRecorderOptions,
 } from "./replayTestHarness.ts";
+import { serverInternals, driveTick } from "../runtime/gameServerTestHarness.ts";
 
 const miniMap: DoorsMap = {
   name: "replay-finalize",
@@ -59,33 +57,6 @@ const miniMap: DoorsMap = {
   },
 };
 
-type ServerInternals = {
-  players: {
-    add(socket: string, name: string, team: "A" | "B"): void;
-    beginLiveMatch(tick: number, nowMs: number): unknown;
-    getMatchPhase(): string;
-    getScores(): { A: number; B: number };
-  };
-  sessions: { emit(...args: unknown[]): void } | null;
-  runtimeMatchId: string;
-  stepSim(tick: number, nowMs: number): SimTickResult;
-  deliverReplayIntegrationTick(
-    tick: number,
-    events: ReadonlyArray<AuthoritativeEvent>,
-  ): void;
-  beginRuntimeMatchIdentity(tick?: number): void;
-  emitMatchStart(matchStart: unknown, tick: number): void;
-  onMatchEnded(
-    packet: {
-      winner: "A" | "B" | "draw";
-      scores: { A: number; B: number };
-      players: unknown[];
-    },
-    nowMs?: number,
-  ): void;
-  replaySink: unknown;
-};
-
 function makeServer(): GameServer {
   return new GameServer({
     name: "replay-finalize",
@@ -102,8 +73,8 @@ function makeServer(): GameServer {
   });
 }
 
-function internals(server: GameServer): ServerInternals {
-  return server as unknown as ServerInternals;
+function internals(server: GameServer) {
+  return serverInternals(server);
 }
 
 function stubSessions(server: GameServer): void {
@@ -118,18 +89,6 @@ function wireRecorder(server: GameServer, opts?: WireRecorderOptions) {
     },
     opts,
   );
-}
-
-function driveTick(server: GameServer, tick: number): SimTickResult {
-  const i = internals(server);
-  const result = i.stepSim(tick, Date.now());
-  const authEvents = drainTickAuthoritativeEvents(
-    i.players as never,
-    tick,
-    result.events,
-  );
-  i.deliverReplayIntegrationTick(tick, authEvents);
-  return result;
 }
 
 async function startLive(

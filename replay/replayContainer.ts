@@ -12,7 +12,11 @@
  *
  * Version: reuses planted `REPLAY_FORMAT_VERSION = 1` (Decision 1 — no second
  * container schema constant). Strict accept/reject is the 10.5 gate
- * (`isSupportedReplayFormatVersion`); full policy expands in #17.
+ * (`isSupportedReplayFormatVersion`). 17.1 catalogs that version.
+ * 17.2 records the sim version on metadata. A missing stamp is not filled
+ * in, and the field is not part of the header.
+ * 17.4 names which older versions play (`replayCompatibility.ts`) and
+ * does not change this container or the load gate.
  *
  * Pure types + build/validate helpers. No filesystem, blob, codec,
  * compression, or `net/` wire imports (scan-locked).
@@ -97,6 +101,11 @@ export type ReplayContainerMetadata = {
   readonly modeId: string | null;
   readonly raidId: string | null;
   readonly gameProto: number;
+  /**
+   * 17.2 sim stamp. Absent on a file written before the field existed.
+   * Absence is not the current `SIMULATION_VERSION`.
+   */
+  readonly simulationVersion?: number;
   readonly buildSha: string | null;
   readonly capturedAtIso: string;
 };
@@ -216,6 +225,7 @@ function metadataSectionFrom(
     modeId: metadata.modeId,
     raidId: metadata.raidId,
     gameProto: metadata.gameProto,
+    simulationVersion: metadata.simulationVersion,
     buildSha: metadata.buildSha,
     capturedAtIso: metadata.capturedAtIso,
   };
@@ -544,6 +554,36 @@ export function validateReplayContainer(
   }
   if (metaSection.gameProto !== init.metadata.gameProto) {
     return { ok: false, reason: "metadata.gameProto disagrees with initialState" };
+  }
+  // Both copies absent is a file from before the stamp. A present stamp
+  // must agree and be a positive integer. Any other well-formed integer
+  // is kept. replayCompatibility.ts says whether that integer can play.
+  // assertReplayPlayable refuses a run that would come out wrong (17.5).
+  const metaHas = "simulationVersion" in metaSection;
+  const initMeta = init.metadata as MatchMetadata & Record<string, unknown>;
+  const initHas = "simulationVersion" in initMeta;
+  if (metaHas || initHas) {
+    if (
+      !metaHas ||
+      !initHas ||
+      metaSection.simulationVersion !== initMeta.simulationVersion
+    ) {
+      return {
+        ok: false,
+        reason: "metadata.simulationVersion disagrees with initialState",
+      };
+    }
+    const simVersion = metaSection.simulationVersion;
+    if (
+      typeof simVersion !== "number" ||
+      !Number.isInteger(simVersion) ||
+      simVersion < 1
+    ) {
+      return {
+        ok: false,
+        reason: "metadata.simulationVersion must be a positive integer",
+      };
+    }
   }
 
   const inputStream = o.inputStream as RecordedTickInputs[];

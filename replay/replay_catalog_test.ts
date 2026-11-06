@@ -8,6 +8,7 @@
 import { assertEquals } from "@std/assert";
 import { GAME_PROTO } from "../shared/net/opcodes.ts";
 import { REPLAY_FORMAT_VERSION } from "../shared/replay/replayFormatVersion.ts";
+import { SIMULATION_VERSION } from "../shared/sim/simulationVersion.ts";
 import { encodeCatalogFixture } from "./replayCatalogFixture.ts";
 import { extractReplayCatalog, sha256Hex } from "./replayCatalog.ts";
 import { decodeReplayContainer } from "./replayEncoding.ts";
@@ -34,6 +35,7 @@ Deno.test("16.2 catalog: searchable fields, checksum stays out of the file", asy
   assertEquals(stamp.teams.ids, ["A"]);
   assertEquals(stamp.gameProto, GAME_PROTO);
   assertEquals(stamp.replayFormatVersion, REPLAY_FORMAT_VERSION);
+  assertEquals(stamp.simulationVersion, SIMULATION_VERSION);
   assertEquals(stamp.buildSha, "cafebabe");
   assertEquals(stamp.checksum, await sha256Hex(bytes));
   assertEquals(stamp.checksum.length, 64);

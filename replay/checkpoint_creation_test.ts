@@ -12,12 +12,8 @@ import {
 } from "@std/assert";
 import { GameServer } from "../runtime/GameServer.ts";
 import { NoopAuthorityAdapter } from "../authority/adapter.ts";
-import { PlayerManager } from "../players/PlayerManager.ts";
 import { MapCollision } from "../world/MapCollision.ts";
 import type { DoorsMap } from "../world/map.ts";
-import type { SimTickResult } from "../players/simTickResult.ts";
-import { drainTickAuthoritativeEvents } from "../players/authoritativeEventSource.ts";
-import type { AuthoritativeEvent } from "../shared/sim/authoritativeEvent.ts";
 import { TICK_HZ, TICK_MS } from "../shared/sim/game.ts";
 import { ReplayRecorder } from "./ReplayRecorder.ts";
 import {
@@ -35,6 +31,7 @@ import {
   resolveCheckpointInterval,
   secondsToCheckpointTicks,
 } from "./checkpointInterval.ts";
+import { serverInternals, driveTick } from "../runtime/gameServerTestHarness.ts";
 
 const miniMap: DoorsMap = {
   name: "checkpoint-creation",
@@ -56,32 +53,6 @@ const miniMap: DoorsMap = {
   },
 };
 
-type ServerInternals = {
-  players: PlayerManager;
-  sessions: { emit(...args: unknown[]): void } | null;
-  runtimeMatchId: string;
-  stepSim(tick: number, nowMs: number): SimTickResult;
-  deliverReplayIntegrationTick(
-    tick: number,
-    events: ReadonlyArray<AuthoritativeEvent>,
-  ): void;
-  flushPendingReplayMatchEnd(tick?: number): void;
-  beginRuntimeMatchIdentity(tick?: number): void;
-  emitMatchStart(
-    matchStart: ReturnType<PlayerManager["beginLiveMatch"]>,
-    tick: number,
-  ): void;
-  onMatchEnded(
-    packet: {
-      winner: "A" | "B" | "draw";
-      scores: { A: number; B: number };
-      players: unknown[];
-    },
-    nowMs?: number,
-  ): void;
-  replaySink: unknown;
-};
-
 function makeServer(joinMode: "open" | "ranked" = "open"): GameServer {
   return new GameServer({
     name: "checkpoint-creation",
@@ -98,8 +69,8 @@ function makeServer(joinMode: "open" | "ranked" = "open"): GameServer {
   });
 }
 
-function internals(server: GameServer): ServerInternals {
-  return server as unknown as ServerInternals;
+function internals(server: GameServer) {
+  return serverInternals(server);
 }
 
 function stubSessions(server: GameServer): void {
@@ -134,20 +105,6 @@ function wireRecorder(
       onCheckpointCaptured: opts.onCheckpointCaptured,
     },
   );
-}
-
-function driveTick(server: GameServer, tick: number): SimTickResult {
-  const i = internals(server);
-  const result = i.stepSim(tick, Date.now());
-  const authEvents = drainTickAuthoritativeEvents(
-    i.players,
-    tick,
-    result.events,
-  );
-  i.deliverReplayIntegrationTick(tick, authEvents);
-  // Mirror startGameLoop: post-drain match-end notify (9.2 final checkpoint).
-  i.flushPendingReplayMatchEnd(tick);
-  return result;
 }
 
 function startLive(

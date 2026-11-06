@@ -10,11 +10,7 @@
  * outside the two documented seams (ingress sink + BotApply enqueue, PR 4).
  */
 
-import {
-  assertEquals,
-  assertMatch,
-  assertNotEquals,
-} from "@std/assert";
+import { assertEquals, assertMatch, assertNotEquals } from "@std/assert";
 import {
   ingressAbility,
   ingressMelee,
@@ -34,39 +30,15 @@ import type { PendingWeapon } from "./weaponsQueue.ts";
 import type { PlayerInput } from "../protocol/network.ts";
 import type { SimRosterLeaveFact, SimTickResult } from "./simTickResult.ts";
 import { normalizeCanonicalInput } from "../shared/sim/canonicalPlayerInput.ts";
-
-const PACKAGE_ROOT = new URL("../", import.meta.url);
-
-function stripComments(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|[^:])\/\/.*$/gm, "$1");
-}
+import {
+  methodBody,
+  readRepoSource,
+  stripComments,
+} from "../runtime/gameServerTestHarness.ts";
 
 function countMatches(source: string, re: RegExp): number {
   const flags = re.flags.includes("g") ? re.flags : `${re.flags}g`;
   return [...source.matchAll(new RegExp(re.source, flags))].length;
-}
-
-async function readRepo(rel: string): Promise<string> {
-  return await Deno.readTextFile(new URL(rel, PACKAGE_ROOT));
-}
-
-/** Extract `private stepSimBody(...) { ... }` body for source scans. */
-function extractStepSimBody(gameServerSrc: string): string {
-  const start = gameServerSrc.indexOf("private stepSimBody(");
-  assertNotEquals(start, -1, "stepSimBody method missing");
-  const brace = gameServerSrc.indexOf("{", start);
-  let depth = 0;
-  for (let i = brace; i < gameServerSrc.length; i++) {
-    const ch = gameServerSrc[i];
-    if (ch === "{") depth++;
-    else if (ch === "}") {
-      depth--;
-      if (depth === 0) return gameServerSrc.slice(brace, i + 1);
-    }
-  }
-  throw new Error("unbalanced stepSim braces");
 }
 
 function makeSinks(state: {
@@ -128,6 +100,19 @@ Deno.test("ingress parse: Input accepts NaN yaw (hand-rolled; not canonical)", (
     forward: true,
   });
   assertEquals(canon.yaw, 0); // finiteOrZero — delta vs ingress
+});
+
+Deno.test("ingress parse: Input passes meleeLunge through only when armed", () => {
+  const base = { sequence: 1, yaw: 0, pitch: 0 };
+  assertEquals(
+    parsePlayerInput({ ...base, meleeLunge: true })?.meleeLunge,
+    true,
+  );
+  assertEquals("meleeLunge" in parsePlayerInput(base)!, false);
+  assertEquals(
+    "meleeLunge" in parsePlayerInput({ ...base, meleeLunge: false })!,
+    false,
+  );
 });
 
 Deno.test("ingress parse: Input boolean-coerces keys; preserves look numbers", () => {
@@ -287,9 +272,9 @@ Deno.test("egress: driver emit order preserves rosterLeaves construction order",
   ]);
 });
 
-Deno.test("boundary: stepSim body has no sessions.emit (connection-timeout moved)", async () => {
-  const src = stripComments(await readRepo("runtime/GameServer.ts"));
-  const body = extractStepSimBody(src);
+Deno.test("boundary: stepSim body has no sessions.emit (connection-timeout moved)", () => {
+  const src = stripComments(readRepoSource("runtime/GameServer.ts"));
+  const body = methodBody(src, "stepSimBody");
   assertEquals(
     countMatches(body, /sessions\s*!\s*\.\s*emit\s*\(/),
     0,
@@ -308,9 +293,9 @@ Deno.test("boundary: stepSim body has no sessions.emit (connection-timeout moved
   assertMatch(driver, /NetEvents\.PlayerLeft/);
 });
 
-Deno.test("boundary: combat packets packed in stepSimBody before pruneDeadAgents", async () => {
-  const src = stripComments(await readRepo("runtime/GameServer.ts"));
-  const body = extractStepSimBody(src);
+Deno.test("boundary: combat packets packed in stepSimBody before pruneDeadAgents", () => {
+  const src = stripComments(readRepoSource("runtime/GameServer.ts"));
+  const body = methodBody(src, "stepSimBody");
   const packAt = body.indexOf("toCombatOutcomePacket");
   const pruneAt = body.indexOf("pruneDeadAgents");
   assertNotEquals(packAt, -1, "stepSimBody must stamp kill-feed names");
@@ -322,18 +307,20 @@ Deno.test("boundary: combat packets packed in stepSimBody before pruneDeadAgents
   );
 });
 
-Deno.test("boundary: registerEvents action handlers go through ingress*", async () => {
-  const src = stripComments(await readRepo("runtime/GameServer.ts"));
+Deno.test("boundary: session event action handlers go through ingress*", () => {
+  const src = stripComments(readRepoSource("runtime/sessionEvents.ts"));
   // Handlers must call ingress helpers — not push pendingWeapons inline.
-  for (const name of [
-    "ingressMovementInput",
-    "ingressShoot",
-    "ingressMelee",
-    "ingressReload",
-    "ingressWeaponSwitch",
-    "ingressAbility",
-    "ingressSkillLoadout",
-  ]) {
+  for (
+    const name of [
+      "ingressMovementInput",
+      "ingressShoot",
+      "ingressMelee",
+      "ingressReload",
+      "ingressWeaponSwitch",
+      "ingressAbility",
+      "ingressSkillLoadout",
+    ]
+  ) {
     assertMatch(src, new RegExp(name));
   }
   // No local parse helpers left at file scope:
@@ -343,8 +330,8 @@ Deno.test("boundary: registerEvents action handlers go through ingress*", async 
   assertEquals(countMatches(src, /^function parseSkillLoadoutPacket\b/m), 0);
 });
 
-Deno.test("boundary: pendingWeapons push only via the two documented seams (PR 4: ingress sink + BotApply enqueue)", async () => {
-  const src = stripComments(await readRepo("runtime/GameServer.ts"));
+Deno.test("boundary: pendingWeapons push only via the two documented seams (PR 4: ingress sink + BotApply enqueue)", () => {
+  const src = stripComments(readRepoSource("runtime/GameServer.ts"));
   // Exactly two legitimate pushes: the human ingress sink (simIngressSinks)
   // and the BotApply enqueueWeapon lambda handed to applyReadyActions.
   const pushes = countMatches(src, /pendingWeapons\.push\s*\(/);
@@ -357,11 +344,8 @@ Deno.test("boundary: pendingWeapons push only via the two documented seams (PR 4
     src,
     /enqueueHumanWeapon:\s*\(req\)\s*=>\s*this\.pendingWeapons\.push/,
   );
-  // `extractStepSimBody` can't be reused here (pre-existing epic-4.8 split:
-  // `stepSim` is now a thin try/finally wrapper over `stepSimBody`, which the
-  // helper above doesn't know to unwrap — see the pre-existing failure this
-  // causes in "boundary: stepSim body has no sessions.emit"). Match against
-  // the whole file instead, same as the pushes-count assertion above.
+  // Both seams are the contract. Match the whole file so a third push
+  // outside stepSimBody cannot hide.
   assertMatch(
     src,
     /applyReadyActions\(\s*tick,\s*nowMs,\s*\(req\)\s*=>\s*this\.pendingWeapons\.push/,
@@ -378,7 +362,7 @@ Deno.test("boundary: simIngress is adapter (not on SIM allowlist)", async () => 
     false,
   );
   const ingress = stripComments(
-    await readRepo("players/simIngress.ts"),
+    readRepoSource("players/simIngress.ts"),
   );
   assertEquals(ingress.includes("transport/"), false);
   assertEquals(/sessions\.emit/.test(ingress), false);

@@ -211,8 +211,8 @@ Deno.test("secret heads and visors are drop-only and never shop or seed legal", 
     dropOnlyPartVariants("head"),
     [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23],
   );
-  assertEquals(VISOR_TYPE_COUNT, 7);
-  assertEquals(dropOnlyPartVariants("visor"), [5, 6]);
+  assertEquals(VISOR_TYPE_COUNT, 8);
+  assertEquals(dropOnlyPartVariants("visor"), [5, 6, 7]);
   assertEquals(equipmentPartLabel("head", 5), "Medusa");
   assertEquals(equipmentPartLabel("head", 6), "Taurus");
   assertEquals(equipmentPartLabel("head", 7), "Ancient");
@@ -233,6 +233,7 @@ Deno.test("secret heads and visors are drop-only and never shop or seed legal", 
   assertEquals(equipmentPartLabel("head", 22), "Unicorn");
   assertEquals(equipmentPartLabel("visor", 5), "Doodle");
   assertEquals(equipmentPartLabel("visor", 6), "Princess");
+  assertEquals(equipmentPartLabel("visor", 7), "Engineer");
 
   const empty = emptyEquipmentOwnedParts();
   for (let v = EQUIPMENT_SHOP_HEAD_TYPE_COUNT; v < HEAD_TYPE_COUNT; v++) {
@@ -266,10 +267,10 @@ Deno.test("secret heads and visors are drop-only and never shop or seed legal", 
 });
 
 Deno.test("secret bodies are drop-only and never shop or seed legal", () => {
-  assertEquals(BODY_TYPE_COUNT, 17);
+  assertEquals(BODY_TYPE_COUNT, 18);
   assertEquals(
     dropOnlyPartVariants("body"),
-    [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+    [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
   );
   assertEquals(equipmentPartLabel("body", 5), "Gym Bro");
   assertEquals(equipmentPartLabel("body", 6), "Pop Can");

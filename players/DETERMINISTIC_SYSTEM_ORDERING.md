@@ -4,8 +4,10 @@ This is the local contract for replay epic 4.7. It pins the authoritative
 execution order across one simulation tick. It creates no recording,
 checkpoint, hash, or replay-file behavior.
 
-Phase identities live in `simTickPhases.ts`. Runtime order lives in
-`GameServer.startGameLoop` and must match that list.
+Phase identities live in `simTickPhases.ts`. The sim phases run in
+`GameServer.stepSimBody`. `GameServer.startGameLoop` calls `stepSim`, then
+the adapters, `emitSimTickEvents`, pose and ping, then `bots.thinkAll`.
+Both must match that list.
 
 ## Locked decisions (Chunk 0)
 

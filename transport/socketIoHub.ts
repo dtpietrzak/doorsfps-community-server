@@ -21,6 +21,7 @@ import type {
   SessionEventHandler,
   SessionHub,
   SessionTransportKind,
+  VolatileEmitResult,
 } from "./types.ts";
 
 export type SocketIoHubOptions = {
@@ -32,6 +33,7 @@ class SocketIoSession implements ClientSession {
   readonly auth: Readonly<SessionAuth>;
   readonly data: SessionData;
   private readonly gameHandlers = new Map<string, Set<SessionEventHandler>>();
+  private lastVolatileByteLength = 0;
 
   constructor(private readonly socket: Socket, data: SessionData) {
     this.auth = Object.freeze({ ...(socket.handshake.auth ?? {}) });
@@ -53,8 +55,20 @@ class SocketIoSession implements ClientSession {
     sendGame(this.socket, event, payload);
   }
 
-  emitVolatile(event: string, payload?: unknown): void {
-    sendGame(this.socket.volatile, event, payload);
+  emitVolatile(event: string, payload?: unknown): VolatileEmitResult {
+    // TCP has no datagram ceiling. `volatile` drops inside Engine.IO when the
+    // buffer is full; this call still handed the packet over.
+    this.lastVolatileByteLength = sendGame(this.socket.volatile, event, payload);
+    return "sent";
+  }
+
+  lastVolatileBytes(): number {
+    return this.lastVolatileByteLength;
+  }
+
+  /** Socket.IO has no datagram cap. Zero is ignored by the pose mirror. */
+  maxDatagramSize(): number {
+    return 0;
   }
 
   on(event: string, handler: SessionEventHandler): void {

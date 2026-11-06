@@ -10,6 +10,7 @@ import type {
   SessionEventHandler,
   SessionHub,
   SessionTransportKind,
+  VolatileEmitResult,
 } from "./types.ts";
 import {
   WEBTRANSPORT_AUTH_TIMEOUT_MS,
@@ -43,6 +44,38 @@ export interface WebTransportHub extends SessionHub {
 
 type WtSessionTransport = WebTransport & { url: string };
 
+/** 64 symbols, so masking a random byte with 0x3f is unbiased. */
+const WT_SESSION_ID_ALPHABET =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+const WT_SESSION_ID_LEN = 8;
+const WT_SESSION_ID_ATTEMPTS = 8;
+
+function randomSessionIdBytes(length: number): Uint8Array {
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+  return bytes;
+}
+
+/**
+ * `wt_` plus 8 url-safe characters. Re-roll while `occupied` reports a live
+ * session. The id is broadcast in every snapshot, so it is not a secret.
+ */
+export function allocateWebTransportSessionId(
+  occupied: (id: string) => boolean,
+  nextBytes: (length: number) => Uint8Array = randomSessionIdBytes,
+): string {
+  for (let attempt = 0; attempt < WT_SESSION_ID_ATTEMPTS; attempt++) {
+    const bytes = nextBytes(WT_SESSION_ID_LEN);
+    let body = "";
+    for (let i = 0; i < WT_SESSION_ID_LEN; i++) {
+      body += WT_SESSION_ID_ALPHABET[(bytes[i] ?? 0) & 63];
+    }
+    const id = `wt_${body}`;
+    if (!occupied(id)) return id;
+  }
+  throw new Error("webtransport session id collision");
+}
+
 class WebTransportSession implements ClientSession {
   readonly kind: SessionTransportKind = "webtransport";
   readonly id: string;
@@ -53,8 +86,8 @@ class WebTransportSession implements ClientSession {
   private writeChain: Promise<void> = Promise.resolve();
   private streamWriter: WritableStreamDefaultWriter<Uint8Array> | null = null;
   private datagramWriter: WritableStreamDefaultWriter<Uint8Array> | null = null;
-  private lastDatagramOk = true;
   private pendingBytes = 0;
+  private lastVolatileByteLength = 0;
   private closed = false;
 
   constructor(
@@ -105,26 +138,32 @@ class WebTransportSession implements ClientSession {
     this.enqueueStream(frame);
   }
 
-  emitVolatile(event: string, payload?: unknown): void {
+  /**
+   * One datagram. A packet that does not fit, or a write that fails, drops
+   * that packet only. The session stays writable for the next one.
+   */
+  emitVolatile(event: string, payload?: unknown): VolatileEmitResult {
     const packet = encodeGamePacket(event, payload);
-    if (!packet || !this.datagramWriter) {
-      this.lastDatagramOk = false;
-      return;
-    }
+    if (packet) this.lastVolatileByteLength = packet.byteLength;
+    if (!packet || this.closed || !this.datagramWriter) return "dropped";
     const max = this.maxDatagramSize();
-    if (max > 0 && packet.byteLength > max) {
-      this.lastDatagramOk = false;
-      return;
-    }
-    this.pendingBytes += packet.byteLength;
+    if (max > 0 && packet.byteLength > max) return "dropped_oversize";
     const writer = this.datagramWriter;
-    void writer.write(packet).then(() => {
-      this.lastDatagramOk = true;
+    const desired = writer.desiredSize;
+    if (desired != null && desired <= 0) return "dropped";
+    this.pendingBytes += packet.byteLength;
+    try {
+      const written = writer.write(packet);
+      void written.then(() => {
+        this.pendingBytes = Math.max(0, this.pendingBytes - packet.byteLength);
+      }).catch(() => {
+        this.pendingBytes = Math.max(0, this.pendingBytes - packet.byteLength);
+      });
+      return "sent";
+    } catch {
       this.pendingBytes = Math.max(0, this.pendingBytes - packet.byteLength);
-    }).catch(() => {
-      this.lastDatagramOk = false;
-      this.pendingBytes = Math.max(0, this.pendingBytes - packet.byteLength);
-    });
+      return "dropped";
+    }
   }
 
   on(event: string, handler: SessionEventHandler): void {
@@ -151,7 +190,7 @@ class WebTransportSession implements ClientSession {
   }
 
   isWritable(): boolean {
-    if (this.closed || !this.lastDatagramOk || !this.datagramWriter) return false;
+    if (this.closed || !this.datagramWriter) return false;
     const desired = this.datagramWriter.desiredSize;
     if (desired == null) return true;
     return desired > 0;
@@ -167,7 +206,11 @@ class WebTransportSession implements ClientSession {
     for (const handler of set) handler(payload);
   }
 
-  private maxDatagramSize(): number {
+  lastVolatileBytes(): number {
+    return this.lastVolatileByteLength;
+  }
+
+  maxDatagramSize(): number {
     const raw = (this.transport.datagrams as { maxDatagramSize?: number })
       .maxDatagramSize;
     return typeof raw === "number" && raw > 0 ? raw : 0;
@@ -478,7 +521,9 @@ class WebTransportHubImpl implements WebTransportHub {
       data = { ...result.data };
     }
 
-    const id = `wt_${crypto.randomUUID()}`;
+    const id = allocateWebTransportSessionId((candidate) =>
+      this.live.has(candidate)
+    );
     const session = new WebTransportSession(
       id,
       auth,

@@ -77,20 +77,36 @@ Deno.test("summarizeNetMirrors: aggregates per-client counters", () => {
   const a = createClientNetMirror();
   a.volatileSent = 10;
   a.volatileDrops = 2;
+  a.volatileOversize = 2;
+  a.largestVolatileBytes = 900;
+  a.maxDatagramSize = 1413;
   a.reliableHeartbeats = 1;
   a.peakWriteBuffer = 4;
   const b = createClientNetMirror();
   b.volatileSent = 8;
+  b.volatileOversize = 1;
+  b.largestVolatileBytes = 1500;
   b.clientRequested = 3;
   b.peakWriteBuffer = 1;
   const s = summarizeNetMirrors([a, b]);
   assertEquals(s.clients, 2);
   assertEquals(s.volatileSent, 18);
   assertEquals(s.volatileDrops, 2);
+  assertEquals(s.volatileOversize, 3);
+  assertEquals(s.largestVolatileBytes, 1500);
+  assertEquals(s.maxDatagramSize, 1413);
   assertEquals(s.reliableHeartbeats, 1);
   assertEquals(s.clientRequested, 3);
   assertEquals(s.peakWriteBuffer, 4);
   assertEquals(s.clientsWithDrops, 1);
+
+  const c = createClientNetMirror();
+  c.maxDatagramSize = 1100;
+  assertEquals(summarizeNetMirrors([a, b, c]).maxDatagramSize, 1100);
+  const empty = summarizeNetMirrors([]);
+  assertEquals(empty.volatileOversize, 0);
+  assertEquals(empty.largestVolatileBytes, 0);
+  assertEquals(empty.maxDatagramSize, null);
 });
 
 Deno.test("volatileDropPct: drops / (sent+drops)", () => {

@@ -11,6 +11,9 @@
  * Version history:
  *   1 — original schema (`mirrorMode` omitted / optional)
  *   2 — required `mirrorMode` (`flipY` | `flipXZ`)
+ *
+ * A replay records this number as `map.version` (epic 17.3). The replay
+ * keeps the version the match used.
  */
 export const MAP_FORMAT_VERSION = 2 as const;
 

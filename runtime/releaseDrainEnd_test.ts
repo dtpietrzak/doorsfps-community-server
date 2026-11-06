@@ -2,11 +2,10 @@ import { assertEquals } from "@std/assert";
 import { io } from "socket.io-client";
 import { GAME_PROTO, decodeGamePacket } from "../shared/net/index.ts";
 import { GameServer } from "./GameServer.ts";
-import { PlayerManager } from "../players/PlayerManager.ts";
 import { MapCollision } from "../world/MapCollision.ts";
 import type { DoorsMap } from "../world/map.ts";
-import type { GameOverPacket } from "../protocol/network.ts";
 import { NetEvents } from "../protocol/network.ts";
+import { serverInternals } from "./gameServerTestHarness.ts";
 
 const miniMap: DoorsMap = {
   name: "drain-end",
@@ -26,13 +25,6 @@ const miniMap: DoorsMap = {
     doorHalfWidth: 2,
     spawnRadius: 4,
   },
-};
-
-type DrainHarness = {
-  releaseLocked: boolean;
-  players: PlayerManager;
-  decorateGameOver: (packet: GameOverPacket) => GameOverPacket;
-  finishIntermission: (tick: number) => void;
 };
 
 Deno.test("release drain returns endgame humans as a real leave", async () => {
@@ -67,7 +59,7 @@ Deno.test("release drain returns endgame humans as a real leave", async () => {
         if (decoded?.event !== NetEvents.Welcome) return;
         assertEquals(server.getHumanCount(), 1);
 
-        const harness = server as unknown as DrainHarness;
+        const harness = serverInternals(server);
         harness.releaseLocked = true;
         const over = harness.players.forceEndMatch(harness.players.tick, "A", {
           scheduleRestart: true,

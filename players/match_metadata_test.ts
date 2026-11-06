@@ -26,6 +26,12 @@ import {
   REPLAY_FORMAT_VERSION,
 } from "../shared/replay/matchMetadata.ts";
 import { GAME_PROTO } from "../shared/net/opcodes.ts";
+import {
+  methodBody,
+  readRepoSource,
+  serverInternals,
+  stripComments,
+} from "../runtime/gameServerTestHarness.ts";
 
 const miniMap: DoorsMap = {
   name: "meta-boundary",
@@ -46,18 +52,6 @@ const miniMap: DoorsMap = {
     spawnRadius: 4,
   },
 };
-
-const PACKAGE_ROOT = new URL("../", import.meta.url);
-
-async function readRepo(rel: string): Promise<string> {
-  return await Deno.readTextFile(new URL(rel, PACKAGE_ROOT));
-}
-
-function stripComments(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|[^:])\/\/.*$/gm, "$1");
-}
 
 function makeServer(over?: {
   name?: string;
@@ -83,20 +77,8 @@ function makeServer(over?: {
   });
 }
 
-function internals(server: GameServer): {
-  runtimeMatchId: string;
-  players: PlayerManager;
-  sessions: { emit(...args: unknown[]): void } | null;
-  beginRuntimeMatchIdentity(): void;
-  handleMatchReady(playerId: string, ready: boolean): void;
-} {
-  return server as unknown as {
-    runtimeMatchId: string;
-    players: PlayerManager;
-    sessions: { emit(...args: unknown[]): void } | null;
-    beginRuntimeMatchIdentity(): void;
-    handleMatchReady(playerId: string, ready: boolean): void;
-  };
+function internals(server: GameServer) {
+  return serverInternals(server);
 }
 
 Deno.test("7.4 coverage: getMatchMetadata matches owners at capture tick", () => {
@@ -216,34 +198,8 @@ Deno.test("7.4 exclusion: metadata JSON has no wall-clock operational keys", () 
   assertEquals(typeof meta.capturedAtIso, "string");
 });
 
-Deno.test("7.4 live path: getMatchMetadata is unused by GameServer behavior paths", async () => {
-  const src = stripComments(await readRepo("runtime/GameServer.ts"));
-
-  function methodBody(name: string): string {
-    // Match `public|private name(` then scan to the body `{` (allows TS return types).
-    const re = new RegExp(`(?:public|private)\\s+${name}\\s*\\(`);
-    const m = re.exec(src);
-    assertEquals(m != null, true, `missing method ${name}`);
-    let i = m!.index + m![0].length; // after '('
-    let depth = 1; // param-list paren depth
-    while (i < src.length && depth > 0) {
-      const ch = src[i++];
-      if (ch === "(") depth++;
-      else if (ch === ")") depth--;
-    }
-    while (i < src.length && src[i] !== "{") i++;
-    assertEquals(src[i] === "{", true, `no body for ${name}`);
-    const start = i;
-    depth = 0;
-    for (; i < src.length; i++) {
-      if (src[i] === "{") depth++;
-      else if (src[i] === "}") {
-        depth--;
-        if (depth === 0) return src.slice(start, i + 1);
-      }
-    }
-    return "";
-  }
+Deno.test("7.4 live path: getMatchMetadata is unused by GameServer behavior paths", () => {
+  const src = stripComments(readRepoSource("runtime/GameServer.ts"));
 
   for (
     const method of [
@@ -252,18 +208,38 @@ Deno.test("7.4 live path: getMatchMetadata is unused by GameServer behavior path
       "onMatchEnded",
       "emitMatchStart",
       "welcomePayload",
-      "flushHeatmapsToAuthority",
       "stepSim",
     ]
   ) {
-    const body = methodBody(method);
+    const body = methodBody(src, method);
     assertEquals(body.includes("getMatchMetadata"), false, method);
     assertEquals(body.includes("buildMatchMetadataFromOwners"), false, method);
     assertEquals(body.includes("requireMatchMetadata"), false, method);
   }
 
+  // Heatmap flush moved with the report. The scan reads that file alone.
+  const heatmap = methodBody(
+    stripComments(readRepoSource("runtime/matchReports.ts")),
+    "flushHeatmapsToAuthority",
+  );
+  assertEquals(
+    heatmap.includes("getMatchMetadata"),
+    false,
+    "flushHeatmapsToAuthority",
+  );
+  assertEquals(
+    heatmap.includes("buildMatchMetadataFromOwners"),
+    false,
+    "flushHeatmapsToAuthority",
+  );
+  assertEquals(
+    heatmap.includes("requireMatchMetadata"),
+    false,
+    "flushHeatmapsToAuthority",
+  );
+
   // Public read exists; only its own body may call the pure builder.
-  const readBody = methodBody("getMatchMetadata");
+  const readBody = methodBody(src, "getMatchMetadata");
   assertEquals(readBody.includes("buildMatchMetadataFromOwners"), true);
   void MATCH_METADATA_LOAD_BEARING_FIELDS;
 });

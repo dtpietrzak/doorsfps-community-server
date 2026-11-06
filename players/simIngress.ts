@@ -9,7 +9,7 @@
  *   → stepSim → SimTickResult → driver emit
  * ```
  *
- * Session `on` handlers stay in `GameServer.registerEvents` (transport
+ * Session `on` handlers live in `runtime/sessionEvents.ts` (transport
  * binding) but must not mutate `latestInput`, `pendingWeapons`, or
  * combat state around these helpers — every accepted byte goes through here.
  *
@@ -58,7 +58,7 @@ export type SimIngressSinks = {
 /**
  * Parse live `NetEvents.Input` bytes.
  * Rejects non-objects and non-numeric sequence/yaw/pitch; boolean-coerces keys.
- * Does not wrap/clamp look (behavior-preserving vs pre-7.1).
+ * Does not wrap/clamp look. `meleeLunge` is passed through when truthy.
  */
 export function parsePlayerInput(raw: unknown): PlayerInput | null {
   if (!raw || typeof raw !== "object") return null;
@@ -67,7 +67,7 @@ export function parsePlayerInput(raw: unknown): PlayerInput | null {
   if (typeof o.sequence !== "number") return null;
   if (typeof o.yaw !== "number" || typeof o.pitch !== "number") return null;
 
-  return {
+  const parsed: PlayerInput = {
     sequence: o.sequence,
     forward: Boolean(o.forward),
     backward: Boolean(o.backward),
@@ -79,6 +79,9 @@ export function parsePlayerInput(raw: unknown): PlayerInput | null {
     yaw: o.yaw,
     pitch: o.pitch,
   };
+  // One-shot edge; absent unless armed (same convention as the bot adapter).
+  if (o.meleeLunge) parsed.meleeLunge = true;
+  return parsed;
 }
 
 /** Parse `NetEvents.Shoot` / `Melee` aim packets. */

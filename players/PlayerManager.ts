@@ -691,6 +691,47 @@ export class PlayerManager {
   }
 
   /**
+   * Diagnostic input health for humans on /api/status. Bots are omitted.
+   * Sorted by id. Not a scoreboard and not a checkpoint field.
+   */
+  public inputHealth(): Array<{
+    id: string;
+    inOverwritten: number;
+    inRepeatTicks: number;
+    inAccepted: number;
+    inputGapP95Ms: number | null;
+    shotDelayP95Ms: number | null;
+    alive: boolean;
+    connectionIssue: boolean;
+  }> {
+    const rows: Array<{
+      id: string;
+      inOverwritten: number;
+      inRepeatTicks: number;
+      inAccepted: number;
+      inputGapP95Ms: number | null;
+      shotDelayP95Ms: number | null;
+      alive: boolean;
+      connectionIssue: boolean;
+    }> = [];
+    for (const p of this.players.values()) {
+      if (p.isBot) continue;
+      rows.push({
+        id: p.id,
+        inOverwritten: p.inOverwritten,
+        inRepeatTicks: p.inRepeatTicks,
+        inAccepted: p.inAccepted,
+        inputGapP95Ms: p.inputGapP95Ms(),
+        shotDelayP95Ms: p.shotDelayP95Ms(),
+        alive: p.alive,
+        connectionIssue: p.connectionIssue,
+      });
+    }
+    rows.sort((a, b) => a.id.localeCompare(b.id));
+    return rows;
+  }
+
+  /**
    * Highest-rated connected player for /api/status (or null if empty).
    * Ties break on kills, then score, then name.
    */

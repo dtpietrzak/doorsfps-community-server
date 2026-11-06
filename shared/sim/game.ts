@@ -512,13 +512,13 @@ export const EQUIPMENT_SHOP_LEG_TYPE_COUNT = 5;
 export const HEAD_TYPE_COUNT = 24;
 
 /** Number of selectable visor mesh variants (0 … VISOR_TYPE_COUNT-1). */
-export const VISOR_TYPE_COUNT = 7;
+export const VISOR_TYPE_COUNT = 8;
 
 /** Number of selectable shoulder-and-arm mesh sets (0 … SHOULDER_TYPE_COUNT-1). */
 export const SHOULDER_TYPE_COUNT = 9;
 
 /** Number of selectable body/torso mesh variants (0 … BODY_TYPE_COUNT-1). */
-export const BODY_TYPE_COUNT = 17;
+export const BODY_TYPE_COUNT = 18;
 
 /** Number of selectable leg mesh variants (0 … LEG_TYPE_COUNT-1). */
 export const LEG_TYPE_COUNT = 11;
@@ -599,6 +599,7 @@ export const VISOR_PART_LABELS = [
   "Dome",
   "Doodle",
   "Princess",
+  "Engineer",
 ] as const;
 
 /**
@@ -621,7 +622,7 @@ export const SHOULDER_PART_LABELS = [
  * Body-only labels, including match-card secrets after the shop family.
  * 0–4 shop · 5 Gym Bro · 6 Pop Can · 7 Barrel · 8 Glitch · 9 Ancient ·
  * 10 Princess · 11 Hotdog · 12 Banana · 13 Football · 14 Zombie ·
- * 15 Cheerleader · 16 Secretary
+ * 15 Cheerleader · 16 Secretary · 17 Engineer
  */
 export const BODY_PART_LABELS = [
   "Standard",
@@ -641,6 +642,7 @@ export const BODY_PART_LABELS = [
   "Zombie",
   "Cheerleader",
   "Secretary",
+  "Engineer",
 ] as const;
 
 /** Leg-only labels: the five shop families followed by secret designs. */
@@ -689,6 +691,7 @@ export const EQUIPMENT_FAMILY_RARITY: Readonly<
   Medusa: "rare",
   "Pop Can": "rare",
   Taurus: "rare",
+  Engineer: "rare",
   "Gym Bro": "epic",
   Princess: "epic",
   Football: "epic",
@@ -1590,7 +1593,7 @@ export type PlayerEquipment = {
    * 20 pumpkin · 21 cheerleader · 22 unicorn · 23 secretary.
    */
   head: number;
-  /** Visor / eyes: 0–4 shop · 5 doodle · 6 princess. */
+  /** Visor / eyes: 0–4 shop · 5 doodle · 6 princess · 7 engineer. */
   visor: number;
   /**
    * Arms (legacy shoulder key): 0–4 shop families · 5 football · 6 princess ·
@@ -1601,7 +1604,7 @@ export type PlayerEquipment = {
    * Body/torso: 0 standard · 1 octo · 2 diamond · 3 spike · 4 dome ·
    * 5 gym bro · 6 pop can · 7 barrel · 8 glitch · 9 ancient · 10 princess ·
    * 11 hotdog · 12 banana · 13 football · 14 zombie · 15 cheerleader ·
-   * 16 secretary.
+   * 16 secretary · 17 engineer.
    */
   body: number;
   /**

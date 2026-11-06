@@ -7,6 +7,7 @@ import type {
   SessionData,
   SessionEventHandler,
   SessionHub,
+  VolatileEmitResult,
 } from "./types.ts";
 
 class FakeSession implements ClientSession {
@@ -23,8 +24,9 @@ class FakeSession implements ClientSession {
   emit(event: string, payload?: unknown): void {
     this.emitted.push({ event, payload, volatile: false });
   }
-  emitVolatile(event: string, payload?: unknown): void {
+  emitVolatile(event: string, payload?: unknown): VolatileEmitResult {
     this.emitted.push({ event, payload, volatile: true });
+    return "sent";
   }
   on(_event: string, _handler: SessionEventHandler): void {}
   disconnect(): void {}

@@ -12,12 +12,8 @@ import {
 } from "@std/assert";
 import { GameServer } from "../runtime/GameServer.ts";
 import { NoopAuthorityAdapter } from "../authority/adapter.ts";
-import { PlayerManager } from "../players/PlayerManager.ts";
 import { MapCollision } from "../world/MapCollision.ts";
 import type { DoorsMap } from "../world/map.ts";
-import type { SimTickResult } from "../players/simTickResult.ts";
-import { drainTickAuthoritativeEvents } from "../players/authoritativeEventSource.ts";
-import type { AuthoritativeEvent } from "../shared/sim/authoritativeEvent.ts";
 import {
   ReplayRecorder,
   REPLAY_RECORDER_TICK_ERROR_THRESHOLD,
@@ -29,6 +25,7 @@ import {
   wireReplayRecorder,
   type WireRecorderOptions,
 } from "./replayTestHarness.ts";
+import { serverInternals, driveTick } from "../runtime/gameServerTestHarness.ts";
 
 const miniMap: DoorsMap = {
   name: "replay-lifecycle",
@@ -50,33 +47,6 @@ const miniMap: DoorsMap = {
   },
 };
 
-type ServerInternals = {
-  players: PlayerManager;
-  sessions: { emit(...args: unknown[]): void } | null;
-  runtimeMatchId: string;
-  stepSim(tick: number, nowMs: number): SimTickResult;
-  deliverReplayIntegrationTick(
-    tick: number,
-    events: ReadonlyArray<AuthoritativeEvent>,
-  ): void;
-  beginRuntimeMatchIdentity(tick?: number): void;
-  noteReplayHumanPresence(tick?: number): void;
-  emitMatchStart(
-    matchStart: ReturnType<PlayerManager["beginLiveMatch"]>,
-    tick: number,
-  ): void;
-  onMatchEnded(
-    packet: {
-      winner: "A" | "B" | "draw";
-      scores: { A: number; B: number };
-      players: unknown[];
-    },
-    nowMs?: number,
-  ): void;
-  replaySink: unknown;
-  maybeResetEmptyRankedInstance?: () => void;
-};
-
 function makeServer(joinMode: "open" | "ranked" = "open"): GameServer {
   return new GameServer({
     name: "replay-lifecycle",
@@ -93,8 +63,8 @@ function makeServer(joinMode: "open" | "ranked" = "open"): GameServer {
   });
 }
 
-function internals(server: GameServer): ServerInternals {
-  return server as unknown as ServerInternals;
+function internals(server: GameServer) {
+  return serverInternals(server);
 }
 
 function stubSessions(server: GameServer): void {
@@ -116,18 +86,6 @@ async function rowFor(
   matchId: string,
 ) {
   return await lifecycle.getByRuntimeMatchId(matchId);
-}
-
-function driveTick(server: GameServer, tick: number): SimTickResult {
-  const i = internals(server);
-  const result = i.stepSim(tick, Date.now());
-  const authEvents = drainTickAuthoritativeEvents(
-    i.players,
-    tick,
-    result.events,
-  );
-  i.deliverReplayIntegrationTick(tick, authEvents);
-  return result;
 }
 
 Deno.test("8.1 kill-switch: default on; 0/false/off/no disable", () => {
@@ -350,9 +308,7 @@ Deno.test("8.1 identity: empty-ranked enterPrematch without rotation keeps row",
   for (const id of ["s1", "s2", "s3", "s4"]) {
     i.players.remove(id);
   }
-  const reset = (server as unknown as {
-    maybeResetEmptyRankedInstance(): boolean;
-  }).maybeResetEmptyRankedInstance();
+  const reset = serverInternals(server).maybeResetEmptyRankedInstance();
   assertEquals(reset, true);
   assertEquals(i.runtimeMatchId, matchId);
   await settleRecorder(recorder);

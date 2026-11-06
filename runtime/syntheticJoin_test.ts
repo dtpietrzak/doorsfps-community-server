@@ -11,6 +11,7 @@ import { NoopAuthorityAdapter } from "../authority/adapter.ts";
 import { Player } from "../players/Player.ts";
 import { MapCollision } from "../world/MapCollision.ts";
 import type { DoorsMap } from "../world/map.ts";
+import { serverInternals } from "./gameServerTestHarness.ts";
 
 const miniMap: DoorsMap = {
   name: "synthetic-join",
@@ -90,11 +91,7 @@ Deno.test("ranked join token synthetic claim authenticates as synthetic", async 
     authorityAdapter: new NoopAuthorityAdapter(),
     botThinkEngine: null,
   });
-  const auth = await (server as unknown as {
-    authenticateJoin(bag: Record<string, unknown>): Promise<
-      { ok: true; synthetic?: boolean } | { ok: false; error: string }
-    >;
-  }).authenticateJoin({
+  const auth = await serverInternals(server).authenticateJoin({
     proto: GAME_PROTO,
     joinToken: issued.joinToken,
   });

@@ -5,6 +5,8 @@
 
 import { assertAlmostEquals, assertEquals } from "jsr:@std/assert@1";
 import type { PlayerInput } from "../protocol/network.ts";
+import { captureCheckpointState } from "../replay/authoritativeCheckpoint.ts";
+import { hashAuthoritativeCheckpoint } from "../replay/replayStateHash.ts";
 import type { DoorsMap, Wall } from "../world/map.ts";
 import { MapCollision } from "../world/MapCollision.ts";
 import { Player } from "./Player.ts";
@@ -217,6 +219,8 @@ Deno.test("multi-arrival tick: last-write-wins", () => {
   assertEquals(sel?.appliedSequence, 2);
   assertEquals(sel?.selectedInput?.backward, true);
   assertEquals(sel?.selectedInput?.forward, false);
+  assertEquals(p.inOverwritten, 1);
+  assertEquals(p.inRepeatTicks, 0);
   // Backward + yaw π: sinπ=0, cosπ=-1 → mz += cos → -Z.
   assertEquals(p.z < 0, true);
 });
@@ -226,6 +230,7 @@ Deno.test("stale sequence dropped", () => {
   p.queueInput(input(5, { forward: true }), 1);
   p.queueInput(input(3, { backward: true }), 1); // stale
   assertEquals(p.lastSequence, 5);
+  assertEquals(p.inOverwritten, 0);
   p.update(collision, 1);
   assertEquals(p.lastTickInputSelection()?.appliedSequence, 5);
   assertEquals(p.lastTickInputSelection()?.selectedInput?.forward, true);
@@ -241,6 +246,8 @@ Deno.test("silent tick repeats last (repeat_missing)", () => {
   assertEquals(sel?.association, "repeat_missing");
   assertEquals(sel?.appliedSequence, 1);
   assertEquals(sel?.inputHoldTicks, 2);
+  assertEquals(p.inRepeatTicks, 1);
+  assertEquals(p.inOverwritten, 0);
   assertEquals(p.z > z1, true); // still walking on held forward (yaw=π → +Z)
 });
 
@@ -251,6 +258,8 @@ Deno.test("never-any-input tick uses neutral association", () => {
   const sel = p.lastTickInputSelection();
   assertEquals(sel?.association, "neutral");
   assertEquals(sel?.selectedInput, null);
+  assertEquals(p.inRepeatTicks, 0);
+  assertEquals(p.inOverwritten, 0);
   assertEquals(sel?.appliedSequence, 0);
   assertEquals(sel?.inputHoldTicks, 0);
   assertAlmostEquals(p.x, x0, 1e-9);
@@ -262,13 +271,18 @@ Deno.test("dead-player input never moves", () => {
   assertEquals(p.alive, false);
   const x0 = p.x;
   const z0 = p.z;
-  p.queueInput(input(1, { forward: true, yaw: p.yaw + 0.2 }), 1);
+  const look = p.yaw + 0.2;
+  p.queueInput(input(1, { forward: true, yaw: look }), 1);
+  p.queueInput(input(2, { forward: true, yaw: look }), 1);
+  assertEquals(p.inOverwritten, 0);
   p.update(collision, 2);
   assertEquals(p.lastTickInputSelection()?.association, "dead");
+  assertEquals(p.inOverwritten, 0);
+  assertEquals(p.inRepeatTicks, 0);
   assertAlmostEquals(p.x, x0, 1e-9);
   assertAlmostEquals(p.z, z0, 1e-9);
   // Look still applied for AFK.
-  assertAlmostEquals(p.yaw, Math.PI + 0.2, 1e-9);
+  assertAlmostEquals(p.yaw, look, 1e-9);
 });
 
 Deno.test("connectionIssue: sitting duck, association connection_issue", () => {
@@ -279,6 +293,9 @@ Deno.test("connectionIssue: sitting duck, association connection_issue", () => {
   const sel = p.lastTickInputSelection();
   assertEquals(sel?.association, "connection_issue");
   assertEquals(sel?.selectedInput, null);
+  assertEquals(p.inRepeatTicks, 0);
+  p.queueInput(input(2, { backward: true }), 1);
+  assertEquals(p.inOverwritten, 0);
 });
 
 Deno.test("mid-tick arrival after snapshot applies next tick only", () => {
@@ -303,6 +320,18 @@ Deno.test("re-queued same sequence labels hold (not repeat_missing)", () => {
   p.update(collision, 2);
   assertEquals(p.lastTickInputSelection()?.association, "hold");
   assertEquals(p.lastTickInputSelection()?.inputHoldTicks, 2);
+  assertEquals(p.inOverwritten, 0);
+  assertEquals(p.inRepeatTicks, 0);
+});
+
+Deno.test("equal sequence before the step counts as overwritten", () => {
+  const { p, collision } = groundedPlayer();
+  p.queueInput(input(1, { forward: true }), 1);
+  p.queueInput(input(1, { forward: true, jump: true }), 1);
+  assertEquals(p.inOverwritten, 1);
+  p.update(collision, 1);
+  assertEquals(p.lastTickInputSelection()?.association, "fresh");
+  assertEquals(p.inRepeatTicks, 0);
 });
 
 Deno.test("equivalence probe: scripted arrivals bit-identical across runs", () => {
@@ -347,4 +376,83 @@ Deno.test("PlayerManager.update: association exposed per roster player", () => {
   pm.update(2, 1);
   assertEquals(a.lastTickInputSelection()?.association, "repeat_missing");
   assertEquals(a.lastTickInputSelection()?.inputHoldTicks, 2);
+  assertEquals(a.inRepeatTicks, 1);
+});
+
+Deno.test("input health is humans only and stays out of the checkpoint hash", () => {
+  const collision = new MapCollision(mapWithWalls());
+  const pm = new PlayerManager(collision, { nowMs: 1 });
+  const bob = pm.add("b", "Bob", "B", undefined, 1);
+  const ada = pm.add("a", "Ada", "A", undefined, 1);
+  const bot = pm.addBot("m", "bot");
+  pm.drainAuthoritativeEvents();
+  ada.queueInput(input(1, { forward: true }), 1);
+  ada.queueInput(input(2, { forward: true }), 1);
+  pm.update(1, 1);
+  pm.update(2, 1);
+  pm.drainAuthoritativeEvents();
+  bot.queueInput(input(1, { forward: true }), 1);
+  bot.queueInput(input(2, { forward: true }), 1);
+  bot.update(collision, 3);
+
+  assertEquals(ada.inOverwritten, 1);
+  assertEquals(ada.inRepeatTicks, 1);
+  assertEquals(bob.inOverwritten, 0);
+  assertEquals(bob.inRepeatTicks, 0);
+  assertEquals(pm.inputHealth(), [
+    {
+      id: "a",
+      inOverwritten: 1,
+      inRepeatTicks: 1,
+      inAccepted: 2,
+      inputGapP95Ms: 0,
+      shotDelayP95Ms: null,
+      alive: true,
+      connectionIssue: false,
+    },
+    {
+      id: "b",
+      inOverwritten: 0,
+      inRepeatTicks: 0,
+      inAccepted: 0,
+      inputGapP95Ms: null,
+      shotDelayP95Ms: null,
+      alive: true,
+      connectionIssue: false,
+    },
+  ]);
+  ada.noteShotArrival(10, 13);
+  assertEquals(ada.shotDelayP95Ms(), (3 * 1000) / 60);
+
+  const first = captureCheckpointState(pm, 2, "diag-match");
+  const row = first.players.find((player) => player.id === "a");
+  assertEquals(row != null, true);
+  assertEquals("inOverwritten" in row!, false);
+  assertEquals("inRepeatTicks" in row!, false);
+  assertEquals("inAccepted" in row!, false);
+  assertEquals("inputGapP95Ms" in row!, false);
+  assertEquals("shotDelayP95Ms" in row!, false);
+  ada.inOverwritten = 50;
+  ada.inRepeatTicks = 50;
+  bot.inOverwritten = 9;
+  bot.inRepeatTicks = 9;
+  const second = captureCheckpointState(pm, 2, "diag-match");
+  assertEquals(
+    hashAuthoritativeCheckpoint(first),
+    hashAuthoritativeCheckpoint(second),
+  );
+});
+
+Deno.test("input gap p95 ignores a stale packet", () => {
+  const { p } = groundedPlayer();
+  p.queueInput(input(1, { forward: true }), 1_000);
+  p.queueInput(input(0, { backward: true }), 5_000);
+  assertEquals(p.inAccepted, 1);
+  assertEquals(p.inOverwritten, 0);
+  assertEquals(p.inputGapP95Ms(), null);
+  p.queueInput(input(2, { forward: true }), 1_050);
+  p.queueInput(input(3, { forward: true }), 1_250);
+  assertEquals(p.inAccepted, 3);
+  assertEquals(p.inOverwritten, 2);
+  assertEquals(p.inputGapP95Ms(), 200);
 });

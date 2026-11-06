@@ -12,6 +12,8 @@ import type { AuthoritativeRosterSnapshot } from "../shared/sim/authoritativeEve
 import { decodeReplayContainer } from "./replayEncoding.ts";
 import { deriveReplayByteMap, type ReplayByteMap } from "./replayByteMap.ts";
 import { isFilledReplayIndex, type ReplayIndex } from "./replayIndex.ts";
+import { readReplayContainerMapVersion } from "./replayMapVersion.ts";
+import { readReplayContainerSimulationVersion } from "./replaySimulationVersion.ts";
 
 export type ReplayRosterEntry = {
   readonly id: string;
@@ -36,6 +38,8 @@ export type ReplayCatalogStamp = {
   readonly teams: ReplayTeamsStamp;
   readonly gameProto: number;
   readonly replayFormatVersion: number;
+  /** Positive integer from the file, or null when the stamp is absent. */
+  readonly simulationVersion: number | null;
   readonly buildSha: string | null;
   readonly checksum: string;
   readonly index: ReplayIndex | null;
@@ -83,9 +87,21 @@ export async function extractReplayCatalog(
     if (!teamIds.includes(player.team)) teamIds.push(player.team);
   }
   const index = isFilledReplayIndex(container.index) ? container.index : null;
+  const rawMapVersion = readReplayContainerMapVersion(container);
+  if (
+    typeof rawMapVersion !== "number" || !Number.isInteger(rawMapVersion) ||
+    rawMapVersion < 1
+  ) {
+    return null;
+  }
+  const rawSim = readReplayContainerSimulationVersion(container);
+  let simulationVersion: number | null = null;
+  if (typeof rawSim === "number" && Number.isInteger(rawSim) && rawSim >= 1) {
+    simulationVersion = rawSim;
+  }
   return {
     mapName: header.map.name,
-    mapVersion: String(header.map.version),
+    mapVersion: String(rawMapVersion),
     gameMode: metadata.modeId,
     durationTicks: header.lastTick - header.firstTick + 1,
     firstTick: header.firstTick,
@@ -94,6 +110,7 @@ export async function extractReplayCatalog(
     teams: { scores: initialState.metadata.scores, ids: teamIds },
     gameProto: metadata.gameProto,
     replayFormatVersion: header.replayFormatVersion,
+    simulationVersion,
     buildSha: metadata.buildSha,
     checksum: await sha256Hex(bytes),
     index,

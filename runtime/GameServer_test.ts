@@ -1,13 +1,11 @@
 import { assertEquals, assertNotEquals } from "@std/assert";
 import { io } from "socket.io-client";
-import { GameServer, parseBotThinkRuntimeMode } from "./GameServer.ts";
+import { GameServer } from "./GameServer.ts";
 import {
   type AuthorityAdapter,
   type HeatmapIngestBody,
   NoopAuthorityAdapter,
 } from "../authority/adapter.ts";
-import { HeatmapTracker } from "../heatmaps/HeatmapTracker.ts";
-import { PlayerManager } from "../players/PlayerManager.ts";
 import { MapCollision } from "../world/MapCollision.ts";
 import type { DoorsMap } from "../world/map.ts";
 import { certificateSha256, writeSelfSignedDevTls } from "../host/tlsDev.ts";
@@ -17,6 +15,7 @@ import {
   encodeAuthFrame,
   StreamFrameReader,
 } from "../transport/webTransportFrame.ts";
+import { serverInternals } from "./gameServerTestHarness.ts";
 
 const miniMap: DoorsMap = {
   name: "tls-test",
@@ -56,30 +55,6 @@ function makeServer(tls?: { cert: string; key: string } | null): GameServer {
   });
 }
 
-Deno.test("parseBotThinkRuntimeMode names Deno-compiled child hosts", () => {
-  assertEquals(parseBotThinkRuntimeMode(undefined), "pipeline-js");
-  assertEquals(
-    parseBotThinkRuntimeMode("pipeline-compiled"),
-    "pipeline-compiled",
-  );
-  assertEquals(
-    parseBotThinkRuntimeMode("pipeline-compiled-shadow"),
-    "pipeline-compiled-shadow",
-  );
-  assertEquals(
-    parseBotThinkRuntimeMode("pipeline-compiled-deno"),
-    "pipeline-compiled-deno",
-  );
-  assertEquals(
-    parseBotThinkRuntimeMode("compiled-deno"),
-    "pipeline-compiled-deno",
-  );
-  assertEquals(
-    parseBotThinkRuntimeMode("pipeline-compiled-deno-shadow"),
-    "pipeline-compiled-deno-shadow",
-  );
-});
-
 Deno.test("intermission map-vote switch changes the map", () => {
   const mapA = { ...miniMap, name: "VoteA" };
   const mapB = { ...miniMap, name: "VoteB" };
@@ -113,12 +88,7 @@ Deno.test("intermission map-vote switch changes the map", () => {
     authorityAdapter: new NoopAuthorityAdapter(),
     botThinkEngine: null,
   });
-  const internals = server as unknown as {
-    players: PlayerManager;
-    sessions: { emit(...args: unknown[]): void } | undefined;
-    mapVotes: Map<string, string>;
-    finishIntermission(tick: number, nowMs: number): void;
-  };
+  const internals = serverInternals(server);
   internals.sessions = { emit: () => {} };
   internals.players.forceEndMatch(10, "A", {
     scheduleRestart: true,
@@ -144,14 +114,7 @@ Deno.test("stop cancels a pending admission bot reconcile timer", async () => {
     authorityAdapter: new NoopAuthorityAdapter(),
     botThinkEngine: null,
   });
-  const internals = server as unknown as {
-    admissionBotReconcileTimer: ReturnType<typeof setTimeout> | null;
-    admissionBotPendingParties: Map<string, { partySize: number }>;
-    onHumanSeatedForBots(opts: {
-      partyId?: string | null;
-      partySize?: number | null;
-    }): void;
-  };
+  const internals = serverInternals(server);
   // First member of a 2-player party: wave stays open, settle timer armed.
   internals.onHumanSeatedForBots({ partyId: "party-1", partySize: 2 });
   assertNotEquals(internals.admissionBotReconcileTimer, null);
@@ -186,12 +149,7 @@ Deno.test("empty live ranked reset flushes actual heatmap stats then clears them
     authorityAdapter: authority,
     botThinkEngine: null,
   });
-  const internals = server as unknown as {
-    players: PlayerManager;
-    heatmaps: HeatmapTracker;
-    sessions: { emit(...args: unknown[]): void };
-    dropPlayer(playerId: string): void;
-  };
+  const internals = serverInternals(server);
   internals.sessions = { emit: () => {} };
 
   const player = internals.players.add("p1", "Early Leaver", "A", {
@@ -411,6 +369,10 @@ Deno.test("GameServer HTTPS: /api/status + Socket.IO welcome", async () => {
           netMirror?: {
             websocketSessions?: number;
             webTransportSessions?: number;
+            volatileOversize?: number;
+            largestVolatileBytes?: number;
+            maxDatagramSize?: number | null;
+            players?: Array<{ id: string }>;
           };
         };
         assertEquals(res.ok, true);
@@ -422,6 +384,10 @@ Deno.test("GameServer HTTPS: /api/status + Socket.IO welcome", async () => {
         assertEquals(body.webTransport?.port, port);
         assertEquals(body.netMirror?.websocketSessions, 0);
         assertEquals(body.netMirror?.webTransportSessions, 0);
+        assertEquals(body.netMirror?.volatileOversize, 0);
+        assertEquals(body.netMirror?.largestVolatileBytes, 0);
+        assertEquals(body.netMirror?.maxDatagramSize, null);
+        assertEquals(body.netMirror?.players, []);
       } finally {
         client.close();
       }

@@ -49,6 +49,7 @@ const RULES: Readonly<Record<string, FileRules>> = {
       restoreFromCheckpoint: "roster construction + socket index",
       insertFromAuthoritativeRoster: "roster construction + socket index",
       getStatusBoard: "status API",
+      inputHealth: "status API input diagnostics",
       getTopPlayer: "status API",
       humanTeamCounts: "lobby team balance",
       canChangeTeam: "lobby team switch",

@@ -34,6 +34,9 @@
  *
  * Raid sessions (`metadata.raidMatch.active === true`) fail closed at
  * create/reset — arena-only scope (notes/replay.md §29.5).
+ * A session the compatibility policy says must not play fails at create,
+ * before `resetToInitial` (17.5). An in-memory session with no file
+ * format stamp is this process's session.
  *
  * Future raid follow-up will need collision resolved per-tick/event instead of
  * once at construction (map switches); this arena runner injects one collision.
@@ -63,14 +66,20 @@ import { loadCheckpointState } from "./checkpointLoading.ts";
 import type { RecordedInitialState } from "./recordedInitialState.ts";
 import type { RecordedActionRow } from "./recordedTickInputs.ts";
 import type { RecordedTickInputs } from "./recordedTickInputs.ts";
+import {
+  assertReplayPlayable,
+  replayCompatibilityFromRunSession,
+} from "./replayCompatibility.ts";
 
 // ---------------------------------------------------------------------------
 // Session contract (11.1 LoadedReplay satisfies later; tests/buffer now)
 // ---------------------------------------------------------------------------
 
 /**
- * Minimal session interface for reconstruction. No bytes, no container, no
- * version gate — those stay in 11.1. Dense `inputAt`, sparse `eventsAt`.
+ * Minimal session interface for reconstruction. No bytes and no container.
+ * 17.5 reads the stamps this session already carries and refuses a run
+ * that would resimulate under the wrong rules. Dense `inputAt`, sparse
+ * `eventsAt`.
  */
 export type ReplayRunSession = {
   readonly initialState: RecordedInitialState;
@@ -644,6 +653,7 @@ class ReplayRunnerImpl implements ReplayRunner {
 
   constructor(session: ReplayRunSession, collision: MapCollision) {
     assertArenaSession(session.initialState);
+    assertReplayPlayable(replayCompatibilityFromRunSession(session));
     if (
       !Number.isInteger(session.firstTick) ||
       !Number.isInteger(session.lastTick) ||

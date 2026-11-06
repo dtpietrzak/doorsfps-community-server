@@ -233,9 +233,9 @@ const TIER_COST_MULT: Record<SkillTier, number> = {
  * slot (0 = slot 1). Higher tiers keep the normal price.
  */
 export const STARTER_SKILL_SLOTS: Readonly<Partial<Record<SkillId, number>>> = {
-  quick: 0,
-  bullets: 1,
-  selfHeal: 2,
+  quick: 1,
+  bullets: 2,
+  selfHeal: 0,
 };
 
 type SkillBase = {
@@ -274,7 +274,7 @@ const SKILL_BASE: Readonly<Record<SkillId, SkillBase>> = {
     vfxBlurb: "Feet glow in your team color while active.",
     values: [1.5, 2, 2.5],
     valueUnit: "s",
-    minLevels: [2, 6, 10],
+    minLevels: [3, 6, 10],
     coinCost: 25,
   },
   glitch: {
@@ -336,7 +336,7 @@ const SKILL_BASE: Readonly<Record<SkillId, SkillBase>> = {
     vfxBlurb: "Green flash on you (screen wash in first person).",
     values: [15, 25],
     valueUnit: "hp",
-    minLevels: [4, 11],
+    minLevels: [2, 11],
     coinCost: 30,
   },
   teamHeal: {
@@ -398,7 +398,7 @@ const SKILL_BASE: Readonly<Record<SkillId, SkillBase>> = {
     vfxBlurb: "Gun glows white while free-fire is active.",
     values: [2, 2.5, 3],
     valueUnit: "s",
-    minLevels: [3, 6, 10],
+    minLevels: [4, 6, 10],
     coinCost: 40,
   },
   hawkeyes: {

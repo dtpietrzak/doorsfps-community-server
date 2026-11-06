@@ -15,6 +15,13 @@ export type SessionData = {
   accountUserId?: string;
   partyId?: string;
   partySize?: number;
+  /** Raid token claims. The seat path activates from this bag. */
+  raidJoin?: {
+    team?: "A" | "B";
+    raidId?: string;
+    partySize?: number;
+    soloRaid?: boolean;
+  };
   assignmentId?: string;
   botsEvictedForJoin?: number;
   head?: number;
@@ -55,6 +62,13 @@ export type SessionAuthenticator = (
 
 export type SessionEventHandler = (payload?: unknown) => void;
 
+/**
+ * One unreliable write.
+ * `dropped_oversize` did not fit in a datagram. `dropped` is any other miss.
+ * Neither sticks: the next call can still return `sent`.
+ */
+export type VolatileEmitResult = "sent" | "dropped_oversize" | "dropped";
+
 /** One connected peer. Ids are opaque; the Socket.IO plugin uses Engine.IO ids. */
 export interface ClientSession {
   readonly id: string;
@@ -63,12 +77,16 @@ export interface ClientSession {
   readonly data: SessionData;
 
   emit(event: string, payload?: unknown): void;
-  emitVolatile(event: string, payload?: unknown): void;
+  emitVolatile(event: string, payload?: unknown): VolatileEmitResult;
   on(event: string, handler: SessionEventHandler): void;
   disconnect(): void;
 
   isWritable(): boolean;
   writeBufferLength(): number;
+  /** Encoded size of the last volatile packet attempted. 0 if none yet. */
+  lastVolatileBytes?(): number;
+  /** Current datagram ceiling. 0 when this transport has none. */
+  maxDatagramSize?(): number;
 }
 
 /** Process-wide fan-out. HTTP(S) stays with GameServer; the hub only attaches. */

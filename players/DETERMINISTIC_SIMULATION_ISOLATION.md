@@ -39,7 +39,7 @@ Core modules / surfaces the step may mutate or call:
 - `server-community/bots/pipeline/*` apply path (`ReadyAction` → player input)
 - Raid encounter / fail helpers invoked from the tick’s SIM phases
 
-Runtime driver today: `GameServer.startGameLoop` (becomes thin driver over `stepSim`).
+Runtime driver: `GameServer.startGameLoop` calls `stepSim` (`stepSimBody` holds the phase list), then applies the NON-SIM adapters.
 
 ### Adapters (consume sim state; must not feed sim resolution)
 
@@ -93,7 +93,7 @@ phaseTiming.record(…)                      // NON-SIM
 | Phase order / event order | `simTickPhases.ts` (`SIM_TICK_PHASES`, `SIM_TICK_EVENT_ORDER`) |
 | Returned events | `simTickResult.ts` (`SimTickEvent`, `SimTickResult`) |
 | SIM allowlist + forbid scan | `simIsolation.ts` (`SIM_FILE_ALLOWLIST`, …) |
-| Runtime step + emit | `GameServer.stepSim`, `GameServer.emitSimTickEvents` |
+| Runtime step + emit | `GameServer.stepSim` (`stepSimBody` holds the phase list), `GameServer.emitSimTickEvents`, driver `GameServer.startGameLoop` |
 | Headless proof | `simIsolation_test.ts` |
 
 ## Handoff

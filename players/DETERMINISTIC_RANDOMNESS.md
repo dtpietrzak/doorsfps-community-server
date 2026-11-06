@@ -79,7 +79,7 @@ Disposition vocabulary for the inventory (Chunk 1 fills rows):
 | Outcome | Owner | Notes |
 |---|---|---|
 | Match seed | #8 (initial state) | Exposed by 4.6; not persisted here |
-| Map-vote winner / no-vote pick / tie break | #5 / #8 | `GameServer.resolveMapVoteWinner` |
+| Map-vote winner / no-vote pick / tie break | #5 / #8 | `MapVote.resolveWinner` |
 | Bot churn join/leave timing & identities | #5 / #8 | Reuse 4.5 enumeration; do not duplicate |
 | Agent / bot identity strings (`crypto.randomUUID` suffixes, etc.) | #5 / #8 | Do not seed UUIDs |
 
@@ -89,7 +89,7 @@ Disposition vocabulary for the inventory (Chunk 1 fills rows):
 - `poolMapVotes` bot-vote stuffing (intermission UI)
 - Pool-pawn display ping (`setPawnPing` from the population director)
 - Transport / runtime IDs (`crypto.randomUUID` for non-sim handles)
-- XP / coin / match-card claim randomness on `GameServer`
+- XP / coin / match-card claims are authority receipts. The match host does not roll them (`GameServer` has no claim `Math.random`)
 - Wall-clock metering (`Date.now`, think/apply ms totals)
 - Bot-think internal RNG (`@doors/bot-engine`)
 
@@ -105,12 +105,12 @@ must move to SEED or RECORD.
 
 | Source | Proof |
 |---|---|
-| `poolMapVotes.seedPoolMapVotes` | Writes only into `GameServer` intermission vote map (`mapVotes`); never called from `PlayerManager` tick / combat / spawn. Covered by `poolMapVotes_test` purity + this contract. |
+| `poolMapVotes.seedPoolMapVotes` | Writes only into `MapVote` intermission ballots; never called from `PlayerManager` tick / combat / spawn. Covered by `poolMapVotes_test` purity + this contract. |
 | `BotManager.rand` churn delay / `mirrorRoll` | Adjusts fill target / schedules reconcile joins/leaves. Sim combat state changes only after bots are added/removed as roster events (#5 records those). Does not call `handleShoot` / `randomSpawn` / damage APIs. |
 | Pool display ping (`setPawnPing`) | The director samples `samplePlayerSimPingMs` off the sim tick and sends `set-ping`. The host writes `player.pingMs` for `role === "pool"` only. 4.4 classifies live ping as NON-SIM; replay supplies recorded lag-comp inputs. |
 | Bot/agent `crypto.randomUUID` ids | Identity strings only. Pose/combat use player id as a key but not the UUID entropy as a roll. Same match seed + same inputs → identical combat/spawn/agent-count outcomes even when ids differ (see `sim_rng_non_observability_test`). |
 | `runtimeMatchId` / `heatmapBatchId` | Authority / heatmap batch correlation only. |
-| `GameServer.resolveMapVoteWinner` | Intermission map pick; RECORD outcome. Does not run during a live sim tick. |
+| `MapVote.resolveWinner` | Intermission map pick; RECORD outcome. Does not run during a live sim tick. |
 | Client `aimSpread` / audio / FX / Menu RNG | Client-only; no server writeback path into `PlayerManager` state. |
 | `bots/helpers/nav.ts` rng | Think/nav helpers behind ReadyAction boundary (4.5). |
 | Authority adapter `random` / temp UUIDs | HTTP/IO path outside community tick loop. |
@@ -149,7 +149,7 @@ below are the authoritative dispositions for this epic.
 | Location | Owner | Notes |
 |---|---|---|
 | Match seed itself | #8 initial state | Exposed by 4.6; not persisted here |
-| `GameServer.resolveMapVoteWinner` no-vote pick + tie break | #5 / #8 | Bare `Math.random` |
+| `MapVote.resolveWinner` no-vote pick + tie break | #5 / #8 | Bare `Math.random` |
 | `server-community/main.ts` `pickRandomMap` (process map pick) | #5 / #8 | Startup / rotation config |
 | Bot/agent/balance-bot id suffixes (`crypto.randomUUID` in `BotManager`) | #5 / #8 | Identity strings |
 | `runtimeMatchId` / `heatmapBatchId` (`GameServer`) | #5 / #8 / ops | Metering / authority correlation; not sim pose |

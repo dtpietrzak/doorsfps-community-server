@@ -13,7 +13,7 @@ Deno.test("server catalog loads the competitive pool, not campaign", async () =>
   try {
     const names = (await listAvailableMapPaths()).map(stem);
     assert(names.includes("Courtyard"));
-    assertEquals(names.some((name) => name.startsWith("Act01-")), false);
+    assertEquals(names.some((name) => name.startsWith("Chapter01-")), false);
     assertEquals(names.includes("Arrival"), false);
     assertEquals(names.some((name) => name.startsWith("TrainingRoom")), false);
   } finally {

@@ -538,6 +538,17 @@ export type PlayerOptions = {
   skillLoadout?: readonly (SkillId | null | string)[] | null;
 };
 
+const DIAG_SAMPLE_CAP = 4096;
+
+/** Nearest-rank percentile. Null when there are no samples. */
+function diagPercentile(samples: readonly number[], p: number): number | null {
+  const n = samples.length;
+  if (n === 0) return null;
+  const sorted = samples.slice().sort((a, b) => a - b);
+  const index = Math.min(n - 1, Math.max(0, Math.ceil(p * n) - 1));
+  return sorted[index]!;
+}
+
 export class Player {
   public readonly id: string;
   /** Unique-on-server display name (validated at join). */
@@ -984,6 +995,26 @@ export class Player {
    * Distinguishes `hold` (re-queued same seq) from `repeat_missing` (silent).
    */
   private arrivalSinceLastStep = false;
+  /**
+   * Diagnostic. A queueInput arrived while the previous one had not been
+   * stepped. Not read by the sim, and not part of the checkpoint or its hash.
+   */
+  public inOverwritten = 0;
+  /**
+   * Diagnostic. Ticks classified `repeat_missing`. Not read by the sim, and
+   * not part of the checkpoint or its hash.
+   */
+  public inRepeatTicks = 0;
+  /**
+   * Diagnostic. Alive-path inputs that were accepted. Denominator for
+   * `inOverwritten`. Not read by the sim, and not part of the checkpoint.
+   */
+  public inAccepted = 0;
+  private lastInputArrivalMs: number | null = null;
+  private inputGapSamples: number[] = [];
+  private inputGapSlot = 0;
+  private shotDelaySamples: number[] = [];
+  private shotDelaySlot = 0;
   /**
    * Copy of the last packet {@link queueInput} accepted since the previous
    * `update`, including look-only arrivals while dead. Recording needs it when
@@ -1554,16 +1585,6 @@ export class Player {
    * Tick is stamped at consumption, not arrival. See `TICK_ASSOCIATION.md`.
    */
   /**
-   * Arrival path for wire/bot `PlayerInput` (epic 5.2).
-   *
-   * Truth table (selection happens at `update` tick-start snapshot):
-   * - stale `sequence < lastSequence` → drop (never selected; no rewind)
-   * - dead → look-only + AFK touch; no `latestInput` / no move
-   * - else → last-write-wins into `latestInput` (multiple arrivals: last wins)
-   *
-   * Tick is stamped at consumption, not arrival. See `TICK_ASSOCIATION.md`.
-   */
-  /**
    * Replay-only: re-establish a held selection without simulating an arrival.
    * A `repeat_missing` tick had no `queueInput` live, so look set since the
    * packet (e.g. a shot's aim) must survive. Only fills an empty buffer
@@ -1597,6 +1618,16 @@ export class Player {
     }
     this.latestInput = input;
     this.lastSequence = input.sequence;
+    if (this.lastInputArrivalMs != null) {
+      this.pushDiagSample(
+        this.inputGapSamples,
+        "gap",
+        nowMs - this.lastInputArrivalMs,
+      );
+    }
+    this.lastInputArrivalMs = nowMs;
+    this.inAccepted += 1;
+    if (this.arrivalSinceLastStep) this.inOverwritten += 1;
     this.arrivalSinceLastStep = true;
     this.lastArrivalInput = { ...input };
     this.yaw = input.yaw;
@@ -3096,7 +3127,49 @@ export class Player {
         ? { queuedInput: this.lastArrivalInput }
         : {}),
     };
+    if (association === "repeat_missing") this.inRepeatTicks += 1;
     this.arrivalSinceLastStep = false;
     this.lastArrivalInput = null;
+  }
+
+  /**
+   * Diagnostic. `clientTick` is the tick the client named on the shot;
+   * `arrivalTick` is the server tick when the packet was received.
+   * Delay is `(arrival − client) / TICK_HZ` in milliseconds.
+   */
+  public noteShotArrival(clientTick: number, arrivalTick: number): void {
+    if (!Number.isFinite(clientTick) || !Number.isFinite(arrivalTick)) return;
+    this.pushDiagSample(
+      this.shotDelaySamples,
+      "shot",
+      (arrivalTick - Math.floor(clientTick)) * (1000 / TICK_HZ),
+    );
+  }
+
+  /** p95 inter-arrival of accepted inputs, or null before the second one. */
+  public inputGapP95Ms(): number | null {
+    return diagPercentile(this.inputGapSamples, 0.95);
+  }
+
+  /** p95 shot delay in ms, or null before the first shot. */
+  public shotDelayP95Ms(): number | null {
+    return diagPercentile(this.shotDelaySamples, 0.95);
+  }
+
+  private pushDiagSample(
+    buf: number[],
+    kind: "gap" | "shot",
+    value: number,
+  ): void {
+    if (!Number.isFinite(value)) return;
+    if (buf.length < DIAG_SAMPLE_CAP) {
+      buf.push(value);
+      return;
+    }
+    const slot = kind === "gap" ? this.inputGapSlot : this.shotDelaySlot;
+    buf[slot] = value;
+    const next = (slot + 1) % DIAG_SAMPLE_CAP;
+    if (kind === "gap") this.inputGapSlot = next;
+    else this.shotDelaySlot = next;
   }
 }

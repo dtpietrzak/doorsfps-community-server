@@ -101,6 +101,7 @@ export const REPLAY_METADATA_FIELD_ORDER = [
   "gameProto",
   "buildSha",
   "capturedAtIso",
+  "simulationVersion",
 ] as const satisfies ReadonlyArray<keyof ReplayContainerMetadata>;
 
 const HEADER_FIELD_SET = new Set<string>(REPLAY_HEADER_FIELD_ORDER);

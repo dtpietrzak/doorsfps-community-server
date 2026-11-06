@@ -18,6 +18,7 @@ import {
   type MatchInitEvent,
 } from "../shared/sim/authoritativeEvent.ts";
 import { TICK_HZ } from "../shared/sim/game.ts";
+import { SIMULATION_VERSION } from "../shared/sim/simulationVersion.ts";
 import {
   buildMatchMetadata,
   REPLAY_FORMAT_VERSION,
@@ -245,6 +246,8 @@ Deno.test("10.1 shape: happy container carries version 1 + reserved slots", () =
   assertEquals(c.header.matchSeed, 42);
   assertEquals(c.header.map, { name: "container-map", version: 1 });
   assertEquals(c.metadata.gameProto, GAME_PROTO);
+  assertEquals(c.metadata.simulationVersion, SIMULATION_VERSION);
+  assertEquals(c.initialState.metadata.simulationVersion, SIMULATION_VERSION);
   assertEquals(c.metadata.capturedAtIso, "2026-01-01T00:00:00.000Z");
   assertEquals(c.initialState.init.kind, "matchInit");
   assertEquals(c.inputStream.length, 3);

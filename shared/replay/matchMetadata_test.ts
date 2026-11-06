@@ -10,6 +10,7 @@ import {
   assertNotEquals,
 } from "jsr:@std/assert@1";
 import { TICK_HZ } from "../sim/game.ts";
+import { SIMULATION_VERSION } from "../sim/simulationVersion.ts";
 import { GAME_PROTO } from "../net/opcodes.ts";
 import { defaultPlayerEquipment } from "../sim/game.ts";
 import { emptyAuthoritativePose } from "../sim/authoritativeEvent.ts";
@@ -111,6 +112,7 @@ Deno.test("7.4 shape: constants pin tickRate / GAME_PROTO / format version", () 
   if (!built.ok) return;
   assertEquals(built.metadata.tickRate, TICK_HZ);
   assertEquals(built.metadata.gameProto, GAME_PROTO);
+  assertEquals(built.metadata.simulationVersion, SIMULATION_VERSION);
   assertEquals(built.metadata.replayFormatVersion, REPLAY_FORMAT_VERSION);
   assertEquals(REPLAY_FORMAT_VERSION, 1);
 });

@@ -34,6 +34,8 @@ import { SIM_TICK_EVENT_ORDER } from "./simTickPhases.ts";
 import type { SimTickEvent } from "./simTickResult.ts";
 import { rosterSnapshotFromPlayer } from "./authoritativeEventDerive.ts";
 
+import { readRepoSource } from "../runtime/gameServerTestHarness.ts";
+
 const map: DoorsMap = {
   name: "auth-event-source",
   version: 2,
@@ -439,10 +441,7 @@ Deno.test("7.3 storm: roster + config + lifecycle + sim facts drain 1:1", () => 
 Deno.test("7.3 live path: drain is read-only — emit order helpers unchanged", () => {
   // Source-scan: startGameLoop drains then (7.5) fans out then emitSimTickEvents.
   // Transport still emits from SimTickResult; sink consumes the drain result.
-  const PACKAGE_ROOT = new URL("../", import.meta.url);
-  const src = Deno.readTextFileSync(
-    new URL("runtime/GameServer.ts", PACKAGE_ROOT),
-  );
+  const src = readRepoSource("runtime/GameServer.ts");
   assertEquals(
     src.includes("drainTickAuthoritativeEvents("),
     true,

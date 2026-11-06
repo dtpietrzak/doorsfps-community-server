@@ -31,7 +31,10 @@ import type { Player } from "../players/Player.ts";
 import type { PlayerManager } from "../players/PlayerManager.ts";
 import { deepFreeze } from "./recordedInitialState.ts";
 
-/** Bump on shape changes (#14 owns compatibility policy). */
+/**
+ * Bump on checkpoint shape changes. 17.1 records this stamp on the current
+ * format row. A schema bump is a checkpoint dialect, not a format-version bump.
+ */
 export const CHECKPOINT_SCHEMA_VERSION = 1 as const;
 
 /** Opaque xorshift32 cursor words for the five resume streams. */

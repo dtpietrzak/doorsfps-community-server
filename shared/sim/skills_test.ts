@@ -148,9 +148,9 @@ Deno.test("tier products require previous tier", () => {
 
 Deno.test("minLevel schedule matches design table", () => {
   const expect: Record<string, number> = {
-    quick: 2,
-    bullets: 3,
-    selfHeal: 4,
+    quick: 3,
+    bullets: 4,
+    selfHeal: 2,
     glitch: 5,
     hawkeyes: 5,
     quick2: 6,
@@ -311,7 +311,7 @@ Deno.test("level 5 legal set matches table (with prereqs)", () => {
 Deno.test("skillLockMessage explains level and prereqs", () => {
   assertEquals(
     skillLockMessage("quick", 1, []),
-    "Reach level 2 to unlock Quick I",
+    "Reach level 3 to unlock Quick I",
   );
   assertEquals(
     skillLockMessage("glitch", 5, []),
@@ -325,7 +325,7 @@ Deno.test("skillLockMessage explains level and prereqs", () => {
     skillLockMessage("quick2", 5, ["quick"]),
     "Reach level 6 to unlock Quick II",
   );
-  assertEquals(skillLockMessage("quick", 2, ["quick"]), null);
+  assertEquals(skillLockMessage("quick", 3, ["quick"]), null);
 });
 
 Deno.test("withOwnedSkill / withoutOwnedSkill cascade", () => {
@@ -417,33 +417,33 @@ Deno.test("starter skills: free tier I, purchasable, due by level", () => {
   assertEquals(isStarterSkillProduct("nope"), false);
 
   // Free does not mean blocked: the buy path still works as a claim.
-  assertEquals(canPurchaseSkillProduct("quick", 2, []), true);
-  assertEquals(canPurchaseSkillProduct("quick", 1, []), false);
+  assertEquals(canPurchaseSkillProduct("quick", 3, []), true);
+  assertEquals(canPurchaseSkillProduct("quick", 2, []), false);
 
-  // Levels: Quick 2, Bullets 3, Self heal 4.
+  // Levels: Self heal 2, Quick 3, Bullets 4.
   assertEquals(starterSkillsDueAtLevel(1, []), []);
-  assertEquals(starterSkillsDueAtLevel(2, []), ["quick"]);
-  assertEquals(starterSkillsDueAtLevel(3, ["quick"]), ["bullets"]);
+  assertEquals(starterSkillsDueAtLevel(2, []), ["selfHeal"]);
+  assertEquals(starterSkillsDueAtLevel(4, ["selfHeal", "quick"]), ["bullets"]);
   assertEquals(starterSkillsDueAtLevel(20, []), ["quick", "bullets", "selfHeal"]);
   assertEquals(starterSkillsDueAtLevel(20, ["quick", "bullets", "selfHeal"]), []);
 });
 
 Deno.test("withStarterSkillsSlotted: fixed slots, fallback, never twice", () => {
   const all = ["quick", "bullets", "selfHeal", "glitch"] as const;
-  // Fresh bar: Quick 1, Bullets 2, Self heal 3.
+  // Fresh bar: Self heal 1, Quick 2, Bullets 3.
   assertEquals(
     withStarterSkillsSlotted(emptySkillLoadout(), ["quick", "bullets", "selfHeal"], [...all]),
-    ["quick", "bullets", "selfHeal", null],
+    ["selfHeal", "quick", "bullets", null],
   );
   // One at a time (level-ups) lands in the same slots.
-  let bar = withStarterSkillsSlotted(emptySkillLoadout(), ["quick"], ["quick"]);
-  assertEquals(bar, ["quick", null, null, null]);
-  bar = withStarterSkillsSlotted(bar, ["bullets"], ["quick", "bullets"]);
-  assertEquals(bar, ["quick", "bullets", null, null]);
+  let bar = withStarterSkillsSlotted(emptySkillLoadout(), ["selfHeal"], ["selfHeal"]);
+  assertEquals(bar, ["selfHeal", null, null, null]);
+  bar = withStarterSkillsSlotted(bar, ["quick"], ["selfHeal", "quick"]);
+  assertEquals(bar, ["selfHeal", "quick", null, null]);
   // Taken slot falls back to the first empty one.
   assertEquals(
-    withStarterSkillsSlotted(["glitch", null, null, null], ["quick"], [...all]),
-    ["glitch", "quick", null, null],
+    withStarterSkillsSlotted(["glitch", null, null, null], ["selfHeal"], [...all]),
+    ["glitch", "selfHeal", null, null],
   );
   // Already equipped elsewhere: left alone.
   assertEquals(
@@ -469,8 +469,8 @@ Deno.test("withStarterSkillsSlotted: fixed slots, fallback, never twice", () => 
 
 Deno.test("canPurchaseSkillProduct gates combat-ready + tree prereqs", () => {
   // Live product with full unlock path.
-  assertEquals(canPurchaseSkillProduct("quick", 2, []), true);
-  assertEquals(canPurchaseSkillProduct("quick", 1, []), false);
+  assertEquals(canPurchaseSkillProduct("quick", 3, []), true);
+  assertEquals(canPurchaseSkillProduct("quick", 2, []), false);
   assertEquals(canPurchaseSkillProduct("quick2", 6, ["quick"]), true);
   assertEquals(canPurchaseSkillProduct("quick2", 6, []), false);
   assertEquals(canPurchaseSkillProduct("quick2", 5, ["quick"]), false);
@@ -488,8 +488,8 @@ Deno.test("canPurchaseSkillProduct gates combat-ready + tree prereqs", () => {
 
   // Self heal + team heal + leech are combat-ready; other future products gated.
   assertEquals(isSkillProductCombatReady("selfHeal"), true);
-  assertEquals(canUnlockSkillProduct("selfHeal", 4, []), true);
-  assertEquals(canPurchaseSkillProduct("selfHeal", 4, []), true);
+  assertEquals(canUnlockSkillProduct("selfHeal", 2, []), true);
+  assertEquals(canPurchaseSkillProduct("selfHeal", 2, []), true);
   assertEquals(canPurchaseSkillProduct("selfHeal2", 11, ["selfHeal"]), true);
   assertEquals(isSkillProductCombatReady("teamHeal"), true);
   assertEquals(canUnlockSkillProduct("teamHeal", 7, ["selfHeal"]), true);

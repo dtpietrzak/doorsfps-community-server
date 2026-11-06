@@ -13,12 +13,8 @@ import {
 } from "@std/assert";
 import { GameServer } from "../runtime/GameServer.ts";
 import { NoopAuthorityAdapter } from "../authority/adapter.ts";
-import { PlayerManager } from "../players/PlayerManager.ts";
 import { MapCollision } from "../world/MapCollision.ts";
 import type { DoorsMap } from "../world/map.ts";
-import type { SimTickResult } from "../players/simTickResult.ts";
-import { drainTickAuthoritativeEvents } from "../players/authoritativeEventSource.ts";
-import type { AuthoritativeEvent } from "../shared/sim/authoritativeEvent.ts";
 import {
   emptyAuthoritativeRosterSnapshot,
   makeMatchInitEvent,
@@ -44,6 +40,7 @@ import {
   ROSTER_ENTRY_REQUIRED_KEYS,
   WALL_CLOCK_EXCLUDED_KEYS,
 } from "./recordedInitialState.ts";
+import { serverInternals, driveTick } from "../runtime/gameServerTestHarness.ts";
 
 const miniMap: DoorsMap = {
   name: "replay-init",
@@ -65,31 +62,6 @@ const miniMap: DoorsMap = {
   },
 };
 
-type ServerInternals = {
-  players: PlayerManager;
-  sessions: { emit(...args: unknown[]): void } | null;
-  runtimeMatchId: string;
-  stepSim(tick: number, nowMs: number): SimTickResult;
-  deliverReplayIntegrationTick(
-    tick: number,
-    events: ReadonlyArray<AuthoritativeEvent>,
-  ): void;
-  beginRuntimeMatchIdentity(tick?: number): void;
-  emitMatchStart(
-    matchStart: ReturnType<PlayerManager["beginLiveMatch"]>,
-    tick: number,
-  ): void;
-  onMatchEnded(
-    packet: {
-      winner: "A" | "B" | "draw";
-      scores: { A: number; B: number };
-      players: unknown[];
-    },
-    nowMs?: number,
-  ): void;
-  maybeResetEmptyRankedInstance?: () => void;
-};
-
 function makeServer(joinMode: "open" | "ranked" = "open"): GameServer {
   return new GameServer({
     name: "replay-init",
@@ -106,8 +78,8 @@ function makeServer(joinMode: "open" | "ranked" = "open"): GameServer {
   });
 }
 
-function internals(server: GameServer): ServerInternals {
-  return server as unknown as ServerInternals;
+function internals(server: GameServer) {
+  return serverInternals(server);
 }
 
 function stubSessions(server: GameServer): void {
@@ -123,18 +95,6 @@ function wireRecorder(server: GameServer, opts?: WireRecorderOptions) {
     },
     opts,
   );
-}
-
-function driveTick(server: GameServer, tick: number): SimTickResult {
-  const i = internals(server);
-  const result = i.stepSim(tick, Date.now());
-  const authEvents = drainTickAuthoritativeEvents(
-    i.players,
-    tick,
-    result.events,
-  );
-  i.deliverReplayIntegrationTick(tick, authEvents);
-  return result;
 }
 
 function sampleRoster() {
@@ -531,9 +491,7 @@ Deno.test("8.2 identity: empty-ranked reset without rotation keeps capture", () 
   for (const id of ["s1", "s2", "s3", "s4"]) {
     i.players.remove(id);
   }
-  const reset = (server as unknown as {
-    maybeResetEmptyRankedInstance(): boolean;
-  }).maybeResetEmptyRankedInstance();
+  const reset = serverInternals(server).maybeResetEmptyRankedInstance();
   assertEquals(reset, true);
   assertEquals(i.runtimeMatchId, matchId);
   assertEquals(recorder.getInitialState(matchId), before);

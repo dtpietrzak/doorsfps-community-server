@@ -14,10 +14,12 @@
  * - Sub-versions (`indexVersion`, `integrityVersion`) are carried verbatim and
  *   gated only by their own sections — never by this top-level gate.
  * - Companions (map name+version, matchSeed, tickRate, gameProto, buildSha) may
- *   be echoed in rejection context; 10.5 assigns them no accept/reject meaning
- *   (#17 owns sim/map/support policy).
- * - #17 expands acceptance / migration / historical sims under a version bump;
- *   never silently widen the v1 set here.
+ *   be echoed in rejection context; 10.5 assigns them no accept/reject meaning.
+ *   17.1's catalog classifies the format version and does not read companions.
+ *   17.2 records the sim version, 17.3 the map. 17.4 names support in
+ *   replayCompatibility.ts and does not widen this gate.
+ * - Do not widen this gate here. A catalogued `previous` version stays
+ *   rejected. 17.4 calls that class migrate and leaves this set unchanged.
  *
  * Purity (scan-locked): imports only the planted constant from matchMetadata —
  * no sim, network, blob, store, codec, compression, hash, signature, or

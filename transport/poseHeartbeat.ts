@@ -35,8 +35,17 @@ export type ClientNetMirror = {
   emitSeq: number;
   /** Volatile snapshot emits that left the host (transport writable). */
   volatileSent: number;
-  /** Volatile snapshots dropped because transport was not writable. */
+  /** Volatile snapshots dropped: transport was not writable, or the datagram did not go out. */
   volatileDrops: number;
+  /** Datagrams that exceeded the session cap. Also counted in volatileDrops. */
+  volatileOversize: number;
+  /** Largest encoded volatile packet attempted, including ones that did not fit. */
+  largestVolatileBytes: number;
+  /**
+   * Lowest positive datagram cap sampled for this client.
+   * Null until a WebTransport session reports one. Zero is not a sample.
+   */
+  maxDatagramSize: number | null;
   /** Reliable pose keyframes (backpressure recovery). */
   reliableHeartbeats: number;
   /** Client-requested reliable poses. */
@@ -60,6 +69,9 @@ export function createClientNetMirror(): ClientNetMirror {
     emitSeq: 0,
     volatileSent: 0,
     volatileDrops: 0,
+    volatileOversize: 0,
+    largestVolatileBytes: 0,
+    maxDatagramSize: null,
     reliableHeartbeats: 0,
     clientRequested: 0,
     lastReliablePoseTick: -1e9,
@@ -133,6 +145,15 @@ export type NetMirrorSummary = {
   clients: number;
   volatileSent: number;
   volatileDrops: number;
+  /** Sum of per-client datagrams that exceeded the cap. */
+  volatileOversize: number;
+  /** Largest encoded volatile packet attempted across live clients. */
+  largestVolatileBytes: number;
+  /**
+   * Lowest positive datagram cap among live clients that have reported one.
+   * Null when no WebTransport cap has been sampled.
+   */
+  maxDatagramSize: number | null;
   reliableHeartbeats: number;
   clientRequested: number;
   peakWriteBuffer: number;
@@ -146,6 +167,9 @@ export function summarizeNetMirrors(
   let clients = 0;
   let volatileSent = 0;
   let volatileDrops = 0;
+  let volatileOversize = 0;
+  let largestVolatileBytes = 0;
+  let maxDatagramSize: number | null = null;
   let reliableHeartbeats = 0;
   let clientRequested = 0;
   let peakWriteBuffer = 0;
@@ -154,8 +178,17 @@ export function summarizeNetMirrors(
     clients += 1;
     volatileSent += m.volatileSent;
     volatileDrops += m.volatileDrops;
+    volatileOversize += m.volatileOversize;
     reliableHeartbeats += m.reliableHeartbeats;
     clientRequested += m.clientRequested;
+    if (m.largestVolatileBytes > largestVolatileBytes) {
+      largestVolatileBytes = m.largestVolatileBytes;
+    }
+    if (m.maxDatagramSize != null && m.maxDatagramSize > 0) {
+      maxDatagramSize = maxDatagramSize == null
+        ? m.maxDatagramSize
+        : Math.min(maxDatagramSize, m.maxDatagramSize);
+    }
     if (m.peakWriteBuffer > peakWriteBuffer) {
       peakWriteBuffer = m.peakWriteBuffer;
     }
@@ -165,6 +198,9 @@ export function summarizeNetMirrors(
     clients,
     volatileSent,
     volatileDrops,
+    volatileOversize,
+    largestVolatileBytes,
+    maxDatagramSize,
     reliableHeartbeats,
     clientRequested,
     peakWriteBuffer,

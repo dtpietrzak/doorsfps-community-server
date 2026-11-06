@@ -9,22 +9,26 @@ type Emitter = {
   emit: (event: string, payload?: unknown) => void;
 };
 
-/** Encode gameplay payloads onto `"g"`; leave empty/named/engine events alone. */
+/**
+ * Encode gameplay payloads onto `"g"`; leave empty/named/engine events alone.
+ * Returns the encoded byte length, or 0 when nothing binary was sent.
+ */
 export function sendGame(
   target: Emitter,
   event: string,
   payload?: unknown,
-): void {
+): number {
   if (!isGameEvent(event)) {
     if (payload === undefined) target.emit(event);
     else target.emit(event, payload);
-    return;
+    return 0;
   }
   if (isEmptyGameEvent(event) && payload === undefined) {
     target.emit(event);
-    return;
+    return 0;
   }
   const buf = encodeGamePacket(event, payload);
-  if (!buf) return;
+  if (!buf) return 0;
   target.emit(GAME_PACKET_EVENT, buf);
+  return buf.byteLength;
 }

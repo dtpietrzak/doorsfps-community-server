@@ -17,51 +17,22 @@ import { assert, assertEquals, assertExists } from "@std/assert";
 import { GameServer } from "../runtime/GameServer.ts";
 import { NoopAuthorityAdapter } from "../authority/adapter.ts";
 import { drainTickAuthoritativeEvents } from "../players/authoritativeEventSource.ts";
-import type { PlayerManager } from "../players/PlayerManager.ts";
-import type { SimTickResult } from "../players/simTickResult.ts";
-import type { SimIngressSinks } from "../players/simIngress.ts";
 import type { PendingWeapon } from "../players/weaponsQueue.ts";
-import type { AuthoritativeEvent } from "../shared/sim/authoritativeEvent.ts";
-import type { ReplayIntegrationSink } from "./replayIntegration.ts";
 import { loadMapBundle } from "../world/loadMap.ts";
 import {
   type AuthoritativeCheckpoint,
   captureCheckpointState,
 } from "./authoritativeCheckpoint.ts";
-import type { ReplayRecorder } from "./ReplayRecorder.ts";
 import { loadReplay } from "./replayLoader.ts";
 import { createReplayRunner } from "./replaySimulationRunner.ts";
 import { settleRecorder, wireReplayRecorder } from "./replayTestHarness.ts";
+import { serverInternals } from "../runtime/gameServerTestHarness.ts";
 
 const MAP_PATH = new URL("../maps/competitive/ElijahMap.doors.json", import.meta.url)
   .pathname;
 const HUMAN_ID = "human-sock";
 const HUMAN_AT_TICK = 180;
 const MATCH_SECONDS = 60;
-
-type ServerInternals = {
-  players: PlayerManager;
-  sessions: unknown;
-  runtimeMatchId: string;
-  maxPlayers: number;
-  lastSimNowMs: number;
-  replayRecorder: ReplayRecorder | null;
-  replaySink: ReplayIntegrationSink | null;
-  pendingReplayMatchEnd: unknown;
-  bots: {
-    reconcile(maxPlayers: number): void;
-    thinkAll(tick: number, collision: unknown): void;
-  };
-  stepSim(tick: number, nowMs: number): SimTickResult;
-  deliverReplayIntegrationTick(
-    tick: number,
-    events: ReadonlyArray<AuthoritativeEvent>,
-  ): void;
-  flushPendingReplayMatchEnd(tick: number): void;
-  emitSimTickEvents(tick: number, events: SimTickResult["events"]): void;
-  noteReplayHumanPresence(tick?: number): void;
-  simIngressSinks(): SimIngressSinks;
-};
 
 /** xorshift32 — scripted human only (bots stay unseeded). */
 function makeRng(seed: number): () => number {
@@ -135,7 +106,7 @@ async function recordLiveMatch(): Promise<{
     authorityAdapter: new NoopAuthorityAdapter(),
     matchDurationSeconds: MATCH_SECONDS,
   });
-  const i = server as unknown as ServerInternals;
+  const i = serverInternals(server);
   i.sessions = { emit: () => {}, sessions: () => [] };
 
   const { recorder, blobDir } = wireReplayRecorder(

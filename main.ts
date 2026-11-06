@@ -14,7 +14,8 @@ import "./shared/env/loadRepoEnv.ts";
 
 import { createElement } from "react";
 import { render } from "ink";
-import { GameServer, type MapCatalogEntry } from "./runtime/GameServer.ts";
+import { GameServer } from "./runtime/GameServer.ts";
+import type { MapCatalogEntry } from "./runtime/gameServerOptions.ts";
 import { loadTlsMaterialFromEnv } from "./host/tlsConfig.ts";
 import {
   findMapCandidate,

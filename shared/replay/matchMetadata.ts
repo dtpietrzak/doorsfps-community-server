@@ -19,10 +19,14 @@
  * / `liveStartedAtMs` never enter this struct. `capturedAtIso` is the only
  * timestamp and is informational-only.
  *
- * #14 expands replay-format version policy; this file only plants the constant.
+ * 17.1 catalogs the planted format version. 17.2 stamps SIMULATION_VERSION
+ * from shared/sim/simulationVersion.ts. Support policy is
+ * server-community/replay/replayCompatibility.ts (17.4).
+ * This file plants the format constant and records the sim version.
  */
 
 import { TICK_HZ } from "../sim/game.ts";
+import { SIMULATION_VERSION } from "../sim/simulationVersion.ts";
 import { GAME_PROTO } from "../net/opcodes.ts";
 import {
   isSupportedMapFormatVersion,
@@ -44,8 +48,9 @@ import {
 /**
  * Minimal replay-file format version. Planted here for #10 headers.
  * Strict accept/reject gate: `shared/replay/replayFormatVersion.ts` (epic 10.5).
- * Full compatibility policy (migration / historical sims / support windows)
- * expands in epic #17 — lineage: 7.4 plant → 10.5 gate → #17 policy.
+ * Catalog: `server-community/replay/replayFormatCatalog.ts` (epic 17.1).
+ * Support policy is replayCompatibility.ts (17.4). The 10.5 gate is unchanged.
+ * Lineage: 7.4 plant → 10.5 gate → 17.1 catalog → 17.4 policy.
  */
 export const REPLAY_FORMAT_VERSION = 1 as const;
 
@@ -132,7 +137,7 @@ export const MATCH_METADATA_FIELD_SPECS = {
   map: {
     class: "loadBearing",
     role: "header",
-    source: "collision.map name+version (via buildMatchInitEvent derivation)",
+    source: "collision.map name+version (via buildMatchInitEvent derivation); 17.3 records map.version",
   },
   prematchEnabled: {
     class: "loadBearing",
@@ -199,6 +204,11 @@ export const MATCH_METADATA_FIELD_SPECS = {
     role: "header",
     source: "server-community/shared/net/opcodes.ts GAME_PROTO",
   },
+  simulationVersion: {
+    class: "informational",
+    role: "header",
+    source: "server-community/shared/sim/simulationVersion.ts SIMULATION_VERSION (17.2 records; 17.4 decides support)",
+  },
   buildSha: {
     class: "informational",
     role: "header",
@@ -207,7 +217,7 @@ export const MATCH_METADATA_FIELD_SPECS = {
   replayFormatVersion: {
     class: "informational",
     role: "header",
-    source: "server-community/shared/replay/matchMetadata.ts REPLAY_FORMAT_VERSION (10.5 gate; #17 expands)",
+    source: "server-community/shared/replay/matchMetadata.ts REPLAY_FORMAT_VERSION (10.5 gate; 17.1 catalog; 17.4 policy)",
   },
   capturedAtIso: {
     class: "informational",
@@ -272,6 +282,8 @@ export type MatchMetadata = {
   modeId: string | null;
   raidId: string | null;
   gameProto: number;
+  /** Deterministic ruleset that produced the match. Not the wire protocol. */
+  simulationVersion: number;
   buildSha: string | null;
   replayFormatVersion: ReplayFormatVersion;
   /** ISO wall-clock stamp at build; never fed back into the sim. */
@@ -567,6 +579,7 @@ export function buildMatchMetadata(
     modeId: identity.modeId ?? null,
     raidId: identity.raidId ?? null,
     gameProto: GAME_PROTO,
+    simulationVersion: SIMULATION_VERSION,
     buildSha: identity.buildSha ?? null,
     replayFormatVersion: REPLAY_FORMAT_VERSION,
     capturedAtIso,

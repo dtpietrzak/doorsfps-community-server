@@ -27,6 +27,7 @@ import {
 } from "../protocol/network.ts";
 import { GameServer } from "../runtime/GameServer.ts";
 import { NoopAuthorityAdapter } from "../authority/adapter.ts";
+import { methodBody, readRepoSource, serverInternals, stripComments } from "../runtime/gameServerTestHarness.ts";
 
 const miniMap: DoorsMap = {
   name: "lifecycle",
@@ -48,21 +49,9 @@ const miniMap: DoorsMap = {
   },
 };
 
-const PACKAGE_ROOT = new URL("../", import.meta.url);
-
-function stripComments(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|[^:])\/\/.*$/gm, "$1");
-}
-
 function countMatches(source: string, re: RegExp): number {
   const flags = re.flags.includes("g") ? re.flags : `${re.flags}g`;
   return [...source.matchAll(new RegExp(re.source, flags))].length;
-}
-
-async function readRepo(rel: string): Promise<string> {
-  return await Deno.readTextFile(new URL(rel, PACKAGE_ROOT));
 }
 
 function makeOpen(): PlayerManager {
@@ -251,13 +240,7 @@ Deno.test("lifecycle edge: empty-ranked reset returns clean prematch (no identit
     authorityAdapter: new NoopAuthorityAdapter(),
     botThinkEngine: null,
   });
-  const internals = server as unknown as {
-    runtimeMatchId: string;
-    players: PlayerManager;
-    sessions: { emit(...args: unknown[]): void };
-    dropPlayer(playerId: string): void;
-    maybeResetEmptyRankedInstance(): boolean;
-  };
+  const internals = serverInternals(server);
   internals.sessions = { emit: () => {} };
 
   const humans = ["p1", "p2", "p3", "p4"].map((id, i) =>
@@ -289,10 +272,7 @@ Deno.test("lifecycle edge: admin map change ends live as draw (no restart) then 
     authorityAdapter: new NoopAuthorityAdapter(),
     botThinkEngine: null,
   });
-  const internals = server as unknown as {
-    runtimeMatchId: string;
-    players: PlayerManager;
-  };
+  const internals = serverInternals(server);
   assertEquals(internals.players.getMatchPhase(), "live");
   const idBefore = internals.runtimeMatchId;
 
@@ -319,13 +299,7 @@ Deno.test("lifecycle edge: release-drain hold starts nothing (finishIntermission
     authorityAdapter: new NoopAuthorityAdapter(),
     botThinkEngine: null,
   });
-  const internals = server as unknown as {
-    runtimeMatchId: string;
-    releaseLocked: boolean;
-    players: PlayerManager;
-    finishIntermission(tick: number, nowMs: number): void;
-    returnHumansToMenuAfterDrain(): void;
-  };
+  const internals = serverInternals(server);
   assertExists(
     internals.players.forceEndMatch(10, "A", {
       scheduleRestart: true,
@@ -359,12 +333,7 @@ Deno.test("lifecycle identity: ready-start rotates via handleMatchReady path", (
     authorityAdapter: new NoopAuthorityAdapter(),
     botThinkEngine: null,
   });
-  const internals = server as unknown as {
-    runtimeMatchId: string;
-    players: PlayerManager;
-    sessions: { emit(...args: unknown[]): void } | null;
-    handleMatchReady(playerId: string, ready: boolean): void;
-  };
+  const internals = serverInternals(server);
   internals.sessions = { emit: () => {} };
 
   for (const id of ["s1", "s2", "s3", "s4"]) {
@@ -382,9 +351,9 @@ Deno.test("lifecycle identity: ready-start rotates via handleMatchReady path", (
 
 // --- Source-scan / single-writer rows ---------------------------------------
 
-Deno.test("lifecycle source-scan: PlayerManager lifecycle methods have no transport/heatmap/authority writes", async () => {
+Deno.test("lifecycle source-scan: PlayerManager lifecycle methods have no transport/heatmap/authority writes", () => {
   const src = stripComments(
-    await readRepo("players/PlayerManager.ts"),
+    readRepoSource("players/PlayerManager.ts"),
   );
   // Whole-file scan is the contract: lifecycle lives only here and must stay pure.
   assertEquals(/sessions\s*\.\s*emit/.test(src), false);
@@ -394,47 +363,69 @@ Deno.test("lifecycle source-scan: PlayerManager lifecycle methods have no transp
   assertEquals(/reportMatch\s*\(/.test(src), false);
 });
 
-Deno.test("lifecycle source-scan: beginRuntimeMatchIdentity call sites are exhaustive", async () => {
-  const src = stripComments(await readRepo("runtime/GameServer.ts"));
+Deno.test("lifecycle source-scan: beginRuntimeMatchIdentity call sites are exhaustive", () => {
+  const src = stripComments(readRepoSource("runtime/GameServer.ts"));
   const calls = countMatches(src, /this\.beginRuntimeMatchIdentity\s*\(/);
-  // Definition + 5 call sites: changeMap, handleMatchReady, activateRaidFromJoin,
-  // finishIntermission map-vote, finishIntermission same-map.
+  // changeMap (1), handleMatchReady (1), finishIntermission map-vote and
+  // same-map (2), plus the RaidRuntime dep arrow. Raid activation itself
+  // calls it from RaidRuntime.activateFromJoin, not the host forwarder.
   assertEquals(
     calls,
     5,
     `expected 5 beginRuntimeMatchIdentity calls, got ${calls}`,
   );
-  assertMatch(src, /changeMap[\s\S]*?beginRuntimeMatchIdentity/);
-  assertMatch(src, /handleMatchReady[\s\S]*?beginRuntimeMatchIdentity/);
-  assertMatch(src, /activateRaidFromJoin[\s\S]*?beginRuntimeMatchIdentity/);
-  assertMatch(src, /finishIntermission[\s\S]*?beginRuntimeMatchIdentity/);
+  assertEquals(
+    countMatches(
+      src,
+      /beginRuntimeMatchIdentity:\s*\(tick\)\s*=>\s*this\.beginRuntimeMatchIdentity\s*\(/,
+    ),
+    1,
+    "one call is the RaidRuntime wiring arrow",
+  );
+  assertEquals(
+    countMatches(methodBody(src, "changeMap"), /this\.beginRuntimeMatchIdentity\s*\(/),
+    1,
+  );
+  assertEquals(
+    countMatches(
+      methodBody(src, "handleMatchReady"),
+      /this\.beginRuntimeMatchIdentity\s*\(/,
+    ),
+    1,
+  );
+  assertEquals(
+    countMatches(
+      methodBody(src, "finishIntermission"),
+      /this\.beginRuntimeMatchIdentity\s*\(/,
+    ),
+    2,
+  );
+  const forwarder = methodBody(src, "activateRaidFromJoin");
+  assertEquals(/beginRuntimeMatchIdentity/.test(forwarder), false);
+
+  const raidSrc = stripComments(readRepoSource("runtime/raidRuntime.ts"));
+  const raidBody = methodBody(raidSrc, "activateFromJoin");
+  assertEquals(
+    countMatches(raidBody, /beginRuntimeMatchIdentity\s*\(/),
+    1,
+    "activateFromJoin is the only raid call site",
+  );
+  assertEquals(
+    countMatches(raidSrc, /\.beginRuntimeMatchIdentity\s*\(/),
+    1,
+  );
 });
 
-Deno.test("lifecycle source-scan: empty-ranked reset does not rotate identity", async () => {
-  const src = stripComments(await readRepo("runtime/GameServer.ts"));
-  const start = src.indexOf("private maybeResetEmptyRankedInstance");
-  assertNotEquals(start, -1);
-  const brace = src.indexOf("{", start);
-  let depth = 0;
-  let end = brace;
-  for (let i = brace; i < src.length; i++) {
-    if (src[i] === "{") depth++;
-    else if (src[i] === "}") {
-      depth--;
-      if (depth === 0) {
-        end = i;
-        break;
-      }
-    }
-  }
-  const body = src.slice(brace, end + 1);
+Deno.test("lifecycle source-scan: empty-ranked reset does not rotate identity", () => {
+  const src = stripComments(readRepoSource("runtime/GameServer.ts"));
+  const body = methodBody(src, "maybeResetEmptyRankedInstance");
   assertEquals(/beginRuntimeMatchIdentity/.test(body), false);
   assertMatch(body, /enterPrematch/);
 });
 
-Deno.test("lifecycle single-writer: matchOver / inPrematch only in lifecycle + construct", async () => {
+Deno.test("lifecycle single-writer: matchOver / inPrematch only in lifecycle + construct", () => {
   const src = stripComments(
-    await readRepo("players/PlayerManager.ts"),
+    readRepoSource("players/PlayerManager.ts"),
   );
   // Assignments only (not reads / comparisons).
   const matchOverWrites = countMatches(src, /this\.matchOver\s*=(?!=)/);
@@ -445,9 +436,9 @@ Deno.test("lifecycle single-writer: matchOver / inPrematch only in lifecycle + c
   assertEquals(inPrematchWrites, 5, `inPrematch writers: ${inPrematchWrites}`);
 });
 
-Deno.test("lifecycle single-writer: restartAtTick writers are endMatch + clears + starts", async () => {
+Deno.test("lifecycle single-writer: restartAtTick writers are endMatch + clears + starts", () => {
   const src = stripComments(
-    await readRepo("players/PlayerManager.ts"),
+    readRepoSource("players/PlayerManager.ts"),
   );
   const writes = countMatches(src, /this\.restartAtTick\s*=(?!=)/);
   // endMatch (schedule or null), clearScheduledRestart, enterPrematch,
@@ -455,9 +446,9 @@ Deno.test("lifecycle single-writer: restartAtTick writers are endMatch + clears 
   assertEquals(writes, 5, `restartAtTick writers: ${writes}`);
 });
 
-Deno.test("lifecycle single-writer: matchEndTick writers are construct + starts + setMatchClock", async () => {
+Deno.test("lifecycle single-writer: matchEndTick writers are construct + starts + setMatchClock", () => {
   const src = stripComments(
-    await readRepo("players/PlayerManager.ts"),
+    readRepoSource("players/PlayerManager.ts"),
   );
   const writes = countMatches(src, /this\.matchEndTick\s*=(?!=)/);
   // construct (default + prematch branch), setMatchClock, enterPrematch,
@@ -465,28 +456,13 @@ Deno.test("lifecycle single-writer: matchEndTick writers are construct + starts 
   assertEquals(writes, 6, `matchEndTick writers: ${writes}`);
 });
 
-Deno.test("lifecycle: stepSim MatchEnd/Intermission comments + driver ownership", async () => {
-  const raw = await readRepo("runtime/GameServer.ts");
+Deno.test("lifecycle: stepSim MatchEnd/Intermission comments + driver ownership", () => {
+  const raw = readRepoSource("runtime/GameServer.ts");
   assertMatch(raw, /--- SIM: MatchEnd --- \(epic 7\.2 lifecycle\)/);
   assertMatch(raw, /--- SIM: Intermission --- \(epic 7\.2 lifecycle\)/);
   const src = stripComments(raw);
   // stepSim is a re-entrancy guard around stepSimBody; the tick lives there.
-  const start = src.indexOf("private stepSimBody(");
-  assertNotEquals(start, -1);
-  const brace = src.indexOf("{", start);
-  let depth = 0;
-  let end = brace;
-  for (let i = brace; i < src.length; i++) {
-    if (src[i] === "{") depth++;
-    else if (src[i] === "}") {
-      depth--;
-      if (depth === 0) {
-        end = i;
-        break;
-      }
-    }
-  }
-  const body = src.slice(brace, end + 1);
+  const body = methodBody(src, "stepSimBody");
   assertMatch(body, /checkMatchEnd/);
   assertMatch(body, /checkMatchTimeLimit/);
   assertMatch(body, /onMatchEnded/);

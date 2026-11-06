@@ -217,14 +217,14 @@ Deno.test("isAbilityActiveAt is exclusive of end tick", () => {
 Deno.test("tier unlock catalog: levels + escalating costs (skills source)", () => {
   // Sourced from shared/sim/skills.ts (PR-3) — not a dual catalog.
   // Quick
-  assertEquals(minLevelForAbility("quick"), 2);
+  assertEquals(minLevelForAbility("quick"), 3);
   assertEquals(minLevelForAbility("quick2"), 6);
   assertEquals(minLevelForAbility("quick3"), 10);
   assertEquals(coinCostForAbility("quick"), 0);
   assertEquals(coinCostForAbility("quick2"), 50);
   assertEquals(coinCostForAbility("quick3"), 100);
   // Bullets
-  assertEquals(minLevelForAbility("bullets"), 3);
+  assertEquals(minLevelForAbility("bullets"), 4);
   assertEquals(minLevelForAbility("bullets2"), 6);
   assertEquals(minLevelForAbility("bullets3"), 10);
   assertEquals(coinCostForAbility("bullets"), 0);
@@ -281,8 +281,8 @@ Deno.test("highestOwnedTier + durationSForOwned", () => {
 });
 
 Deno.test("shop gates: level, prerequisite tier, tree chain, coins own", () => {
-  assertEquals(isAbilityShopUnlocked("quick", 1), false);
-  assertEquals(isAbilityShopUnlocked("quick", 2), true);
+  assertEquals(isAbilityShopUnlocked("quick", 2), false);
+  assertEquals(isAbilityShopUnlocked("quick", 3), true);
   assertEquals(isAbilityShopUnlocked("quick2", 5), false);
   assertEquals(isAbilityShopUnlocked("quick2", 6), true);
 
@@ -295,9 +295,9 @@ Deno.test("shop gates: level, prerequisite tier, tree chain, coins own", () => {
   assertEquals(isAbilityOwned("quick2", ["quick", "quick2"]), true);
 
   // T1 buy
-  assertEquals(canPurchaseAbility("quick", 1, []), false);
-  assertEquals(canPurchaseAbility("quick", 2, []), true);
-  assertEquals(canPurchaseAbility("quick", 2, ["quick"]), false);
+  assertEquals(canPurchaseAbility("quick", 2, []), false);
+  assertEquals(canPurchaseAbility("quick", 3, []), true);
+  assertEquals(canPurchaseAbility("quick", 3, ["quick"]), false);
 
   // T2 requires T1 owned (min level 6 from skills catalog)
   assertEquals(canPurchaseAbility("quick2", 6, []), false);
@@ -319,7 +319,7 @@ Deno.test("shop gates: level, prerequisite tier, tree chain, coins own", () => {
 
   assertEquals(
     abilityLockMessage("quick", 1, []),
-    "Reach level 2 to unlock Quick I in the shop",
+    "Reach level 3 to unlock Quick I in the shop",
   );
   assertEquals(
     abilityLockMessage("quick", 5, []),
@@ -345,7 +345,7 @@ Deno.test("shop gates: level, prerequisite tier, tree chain, coins own", () => {
 
   // Seed unlock path mirrors skill tree prereqs.
   assertEquals(ownedAbilitiesForLevel(1), []);
-  assertEquals(ownedAbilitiesForLevel(3), ["quick", "bullets"]);
+  assertEquals(ownedAbilitiesForLevel(3), ["quick"]);
   assertEquals(ownedAbilitiesForLevel(5).includes("quick"), true);
   assertEquals(ownedAbilitiesForLevel(5).includes("quick2"), false); // L6
   assertEquals(ownedAbilitiesForLevel(5).includes("bullets"), true);

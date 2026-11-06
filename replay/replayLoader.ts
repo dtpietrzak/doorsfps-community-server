@@ -9,6 +9,7 @@
  * Pipeline (Decision 1):
  *   getReplayFormatVersionFromBytes → decodeReplayContainer →
  *   assertReplayFormatVersion (10.5 gate + companion echo) →
+ *   assertReplayPlayable (17.5) →
  *   accessor-map build → freeze.
  *
  * Session contract (locked):
@@ -39,6 +40,10 @@ import {
   ReplayFormatVersionError,
   type ReplayFormatVersionCompanionEcho,
 } from "../shared/replay/replayFormatVersion.ts";
+import {
+  assertReplayPlayable,
+  replayCompatibilityFromContainer,
+} from "./replayCompatibility.ts";
 import type { AuthoritativeCheckpoint } from "./authoritativeCheckpoint.ts";
 import {
   CheckpointIndex,
@@ -272,8 +277,9 @@ function filledIndexOrNull(index: ReplayContainerIndex): ReplayIndex | null {
 /**
  * Load finalized replay bytes into a frozen, randomly-accessible session.
  *
- * Pure: never mutates `bytes`. Failures use the 10.2 / 10.5 named taxonomy
- * (`ReplayEncodingError` / `ReplayFormatVersionError`) — never a partial session.
+ * Pure: never mutates `bytes`. Failures use the 10.2 / 10.5 / 17.5 named
+ * taxonomy (`ReplayEncodingError` / `ReplayFormatVersionError` /
+ * `ReplayIncompatibleError`) — never a partial session.
  */
 export function loadReplay(bytes: Uint8Array): LoadedReplay {
   // Cheap version pre-check (also surfaces truncated / bad utf-8 / bad json / bad shape).
@@ -289,6 +295,7 @@ export function loadReplay(bytes: Uint8Array): LoadedReplay {
 
   const companions = companionsFromContainer(container);
   assertReplayFormatVersion(container.header, companions);
+  assertReplayPlayable(replayCompatibilityFromContainer(container));
 
   const inputByTick = buildInputMap(container);
   const eventsByTick = buildEventMap(container);

@@ -3,7 +3,7 @@
  * connect/disconnect stay named events.
  */
 
-/** Bump when a packet layout is incompatible. */
+/** Bump when a packet layout is incompatible. Replay files record the sim version separately. */
 export const GAME_PROTO = 4;
 
 /**
