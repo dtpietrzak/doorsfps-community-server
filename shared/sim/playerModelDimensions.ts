@@ -126,6 +126,7 @@ export function isStockyLegType(legType: number): boolean {
     case 3:
     case 4:
     case 8:
+    case 11:
       return true;
     default:
       return false;

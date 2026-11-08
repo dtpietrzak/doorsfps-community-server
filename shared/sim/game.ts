@@ -509,19 +509,19 @@ export const EQUIPMENT_SHOP_BODY_TYPE_COUNT = 5;
 export const EQUIPMENT_SHOP_LEG_TYPE_COUNT = 5;
 
 /** Number of selectable head mesh variants (0 … HEAD_TYPE_COUNT-1). */
-export const HEAD_TYPE_COUNT = 24;
+export const HEAD_TYPE_COUNT = 25;
 
 /** Number of selectable visor mesh variants (0 … VISOR_TYPE_COUNT-1). */
-export const VISOR_TYPE_COUNT = 8;
+export const VISOR_TYPE_COUNT = 9;
 
 /** Number of selectable shoulder-and-arm mesh sets (0 … SHOULDER_TYPE_COUNT-1). */
 export const SHOULDER_TYPE_COUNT = 9;
 
 /** Number of selectable body/torso mesh variants (0 … BODY_TYPE_COUNT-1). */
-export const BODY_TYPE_COUNT = 18;
+export const BODY_TYPE_COUNT = 19;
 
 /** Number of selectable leg mesh variants (0 … LEG_TYPE_COUNT-1). */
-export const LEG_TYPE_COUNT = 11;
+export const LEG_TYPE_COUNT = 12;
 
 /** Number of selectable pistol mesh variants (0 … PISTOL_TYPE_COUNT-1). */
 export const PISTOL_TYPE_COUNT = 5;
@@ -561,7 +561,7 @@ export const SCOPE_PART_LABELS = EQUIPMENT_PART_LABELS;
  * 0–4 shop · 5 Medusa · 6 Taurus · 7 Ancient · 8 Pop Can · 9 Star ·
  * 10 Glitch · 11 Pirate · 12 Barrel · 13 Bucket Head · 14 Doodle ·
  * 15 Princess · 16 Hotdog · 17 Banana · 18 Football · 19 Zombie ·
- * 20 Pumpkin · 21 Cheerleader · 22 Unicorn · 23 Secretary
+ * 20 Pumpkin · 21 Cheerleader · 22 Unicorn · 23 Secretary · 24 French Drain
  */
 export const HEAD_PART_LABELS = [
   "Standard",
@@ -588,6 +588,7 @@ export const HEAD_PART_LABELS = [
   "Cheerleader",
   "Unicorn",
   "Secretary",
+  "French Drain",
 ] as const;
 
 /** Visor-only labels: the five shop families followed by secret designs. */
@@ -600,6 +601,7 @@ export const VISOR_PART_LABELS = [
   "Doodle",
   "Princess",
   "Engineer",
+  "Hard Rect",
 ] as const;
 
 /**
@@ -622,7 +624,7 @@ export const SHOULDER_PART_LABELS = [
  * Body-only labels, including match-card secrets after the shop family.
  * 0–4 shop · 5 Gym Bro · 6 Pop Can · 7 Barrel · 8 Glitch · 9 Ancient ·
  * 10 Princess · 11 Hotdog · 12 Banana · 13 Football · 14 Zombie ·
- * 15 Cheerleader · 16 Secretary · 17 Engineer
+ * 15 Cheerleader · 16 Secretary · 17 Engineer · 18 V-Neck
  */
 export const BODY_PART_LABELS = [
   "Standard",
@@ -643,6 +645,7 @@ export const BODY_PART_LABELS = [
   "Cheerleader",
   "Secretary",
   "Engineer",
+  "V-Neck",
 ] as const;
 
 /** Leg-only labels: the five shop families followed by secret designs. */
@@ -658,6 +661,7 @@ export const LEG_PART_LABELS = [
   "Zombie",
   "Cheerleader",
   "Secretary",
+  "Shin Guards",
 ] as const;
 
 /** Remaining slot-aligned pieces in the two secret food fits. */
@@ -692,6 +696,10 @@ export const EQUIPMENT_FAMILY_RARITY: Readonly<
   "Pop Can": "rare",
   Taurus: "rare",
   Engineer: "rare",
+  "French Drain": "rare",
+  "Hard Rect": "rare",
+  "V-Neck": "rare",
+  "Shin Guards": "rare",
   "Gym Bro": "epic",
   Princess: "epic",
   Football: "epic",
@@ -1590,10 +1598,10 @@ export type PlayerEquipment = {
    * 5 medusa · 6 taurus · 7 ancient · 8 pop can · 9 star ·
    * 10 glitch · 11 pirate · 12 barrel · 13 bucket head · 14 doodle ·
    * 15 princess · 16 hotdog · 17 banana · 18 football · 19 zombie ·
-   * 20 pumpkin · 21 cheerleader · 22 unicorn · 23 secretary.
+   * 20 pumpkin · 21 cheerleader · 22 unicorn · 23 secretary · 24 french drain.
    */
   head: number;
-  /** Visor / eyes: 0–4 shop · 5 doodle · 6 princess · 7 engineer. */
+  /** Visor / eyes: 0–4 shop · 5 doodle · 6 princess · 7 engineer · 8 hard rect. */
   visor: number;
   /**
    * Arms (legacy shoulder key): 0–4 shop families · 5 football · 6 princess ·
@@ -1604,12 +1612,12 @@ export type PlayerEquipment = {
    * Body/torso: 0 standard · 1 octo · 2 diamond · 3 spike · 4 dome ·
    * 5 gym bro · 6 pop can · 7 barrel · 8 glitch · 9 ancient · 10 princess ·
    * 11 hotdog · 12 banana · 13 football · 14 zombie · 15 cheerleader ·
-   * 16 secretary · 17 engineer.
+   * 16 secretary · 17 engineer · 18 v-neck.
    */
   body: number;
   /**
    * Legs: 0–4 shop families · 5 princess · 6 hotdog · 7 banana · 8 zombie ·
-   * 9 cheerleader · 10 secretary.
+   * 9 cheerleader · 10 secretary · 11 shin guards.
    */
   leg: number;
   /**
