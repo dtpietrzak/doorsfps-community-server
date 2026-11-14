@@ -13,7 +13,7 @@ const ROOT_SHARED = "root shared";
 const OUTSIDE = "a file outside server-community";
 
 const PACKAGE_ROOT = new URL("..", import.meta.url);
-const SKIP_DIRS = new Set(["node_modules", "dist", "graphify-out", ".deno"]);
+const SKIP_DIRS = new Set(["node_modules", "dist", ".deno"]);
 const SOURCE_EXT = new Set([".ts", ".tsx", ".js", ".mjs", ".jsx"]);
 
 const FROM_SPEC = /(?:import|export)\b[\s\S]*?\bfrom\s*["']([^"']+)["']/g;
