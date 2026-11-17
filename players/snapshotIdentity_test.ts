@@ -1,4 +1,5 @@
 import { assertEquals, assertExists } from "jsr:@std/assert";
+import { decodeGamePacket, encodeGamePacket } from "../shared/net/codec.ts";
 import { PlayerManager } from "./PlayerManager.ts";
 import { MapCollision } from "../world/MapCollision.ts";
 import type { DoorsMap } from "../world/map.ts";
@@ -211,6 +212,73 @@ Deno.test("getFullPlayerRoster returns identity for all players", () => {
   assertEquals(bob.name, "Bob");
   assertEquals(bob.head, 3);
   assertEquals(bob.visor, 2);
+});
+
+Deno.test("createSnapshot motion keeps grey-agent name and dome fit", () => {
+  const pm = makeManager();
+  pm.add("s1", "Alice", "A");
+  pm.addBot("bot:1", "bot1");
+  const agent = pm.addAgent("agent:1-test", "agent1", "A", {
+    x: 1.25,
+    y: 1.7,
+    z: -2.5,
+    yaw: 0.4,
+  });
+  agent.score = 9;
+  agent.kills = 4;
+  agent.deaths = 1;
+
+  const snap = pm.createSnapshot(60, "motion");
+  const human = snap.players.find((p) => p.id === "s1");
+  const bot = snap.players.find((p) => p.id === "bot:1");
+  const row = snap.players.find((p) => p.id === "agent:1-test");
+  assertExists(human);
+  assertExists(bot);
+  assertExists(row);
+  assertEquals(human.name, undefined);
+  assertEquals(human.head, undefined);
+  assertEquals(human.isAgent, undefined);
+  assertEquals(bot.name, undefined);
+  assertEquals(bot.head, undefined);
+  assertEquals(row.name, "agent1");
+  assertEquals(row.isAgent, true);
+  assertEquals(row.head, 4);
+  assertEquals(row.visor, 4);
+  assertEquals(row.shoulder, 4);
+  assertEquals(row.body, 4);
+  assertEquals(row.leg, 4);
+  assertEquals(row.pistol, 4);
+  assertEquals(row.rifle, 4);
+  assertEquals(row.shotgun, 4);
+  assertEquals(row.crosshair, 4);
+  assertEquals(row.scope, 0);
+  assertEquals(row.score, undefined);
+  assertEquals(row.kills, undefined);
+  assertEquals(row.deaths, undefined);
+
+  const buf = encodeGamePacket("snapshot", snap);
+  assertExists(buf);
+  const decoded = decodeGamePacket(buf);
+  assertExists(decoded);
+  const back = decoded.payload as typeof snap;
+  const wireHuman = back.players.find((p) => p.id === "s1");
+  const wireAgent = back.players.find((p) => p.id === "agent:1-test");
+  assertExists(wireHuman);
+  assertExists(wireAgent);
+  assertEquals(wireHuman.name, undefined);
+  assertEquals(wireHuman.head, undefined);
+  assertEquals(wireAgent.name, "agent1");
+  assertEquals(wireAgent.isAgent, true);
+  assertEquals(wireAgent.head, 4);
+  assertEquals(wireAgent.body, 4);
+  assertEquals(wireAgent.rifle, 4);
+  assertEquals(wireAgent.scope, 0);
+  assertEquals(wireAgent.score, undefined);
+  // Name selects float32 pose bytes. The value is already motion-quantized;
+  // float32 is within a fraction of a millimeter of that milli value.
+  assertEquals(Math.abs(wireAgent.x - row.x) < 1e-4, true);
+  assertEquals(Math.abs(wireAgent.y - row.y) < 1e-4, true);
+  assertEquals(Math.abs(wireAgent.z - row.z) < 1e-4, true);
 });
 
 Deno.test("createSnapshot defaults to motion mode", () => {

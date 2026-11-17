@@ -122,6 +122,11 @@ export type OpenPartyRaidOccupancyView = {
   occupied: boolean;
   /** Wall-clock ms when the assemble lock expires; null while playing. */
   expiresAt: number | null;
+  /**
+   * While occupied: parties ahead of this one for the raid (the holder plus
+   * earlier waiting parties). Null/absent when not waiting.
+   */
+  groupsAhead?: number | null;
 };
 
 export type OpenPartyView = {

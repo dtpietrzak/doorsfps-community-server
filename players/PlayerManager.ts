@@ -3591,8 +3591,10 @@ export class PlayerManager {
   /**
    * Build a snapshot for the wire.
    * @param mode `motion` (default) for the 20 Hz pose stream — omits name /
-   *   cosmetics / scoreboard. `full` for join Welcome / Ready catch-up so a
-   *   newly connected client can cache identity + equipment once.
+   *   cosmetics / scoreboard for humans and team bots. Grey agents include
+   *   name and dome cosmetics on every motion row (they spawn mid-match).
+   *   `full` for join Welcome / Ready catch-up so a newly connected client
+   *   can cache identity + equipment once.
    */
   public createSnapshot(
     tick: number,

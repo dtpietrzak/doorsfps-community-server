@@ -198,6 +198,9 @@ export type WireSnapshotPlayer = {
 };
 
 function writePlayer(w: ByteWriter, p: WireSnapshotPlayer): void {
+  // Name present selects full-precision pose (PF_NAME). Agent motion rows
+  // set a name so identity survives the 20 Hz stream; those poses are
+  // already quantized by Player.toSnapshot.
   const full = p.name != null;
   let flags = 0;
   if (p.alive) flags |= PF_ALIVE;

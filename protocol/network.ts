@@ -485,7 +485,8 @@ export type HitZone = "head" | "body";
  * - full: join / Welcome.players / Ready catch-up / PlayerJoined
  *   (name, cosmetics, score/K/D, ping) — clients cache identity from this
  * - motion: 20 Hz stream — pose, ammo, health; no score/K/D (event-driven);
- *   ping only on 2 Hz ticks; clients merge onto cached identity
+ *   ping only on 2 Hz ticks; clients merge onto cached identity.
+ *   Grey agents also send name + dome cosmetics on every motion row.
  */
 export type SnapshotPlayerMode = "full" | "motion";
 
@@ -493,7 +494,8 @@ export interface SnapshotPlayer {
   id: string;
   /**
    * Unique-on-server display name.
-   * Omitted on motion-only 20 Hz snapshots once the client has cached it.
+   * Omitted on human/bot motion snapshots once the client has cached it.
+   * Present on every grey-agent motion row (`agentN`).
    */
   name?: string;
   x: number;

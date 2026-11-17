@@ -1421,7 +1421,9 @@ export class Player {
    * Serialize for the wire.
    * @param mode `full` includes name + cosmetics + scoreboard (join/welcome).
    *   `motion` is the 20 Hz stream: pose/ammo/health; omits score/K/D
-   *   (event-driven) and only includes ping at 2 Hz.
+   *   (event-driven) and only includes ping at 2 Hz. Grey agents also carry
+   *   name and dome cosmetics on every motion row — they spawn mid-match,
+   *   and a thin row must not arrive as "Unknown" in the standard fit.
    */
   /**
    * @param glitchCollision When set, computes authoritative Glitch remote
@@ -1541,12 +1543,15 @@ export class Player {
           base.ping = Math.round(this.pingMs);
         }
       }
+      // Name on the row also selects full-precision pose bytes. Values are
+      // already motion-quantized above; the extra bytes are the identity.
+      if (this.isAgent) Object.assign(base, this.snapshotLook());
       return base;
     }
 
     return {
       ...base,
-      name: this.name,
+      ...this.snapshotLook(),
       score: this.score,
       kills: this.kills,
       deaths: this.deaths,
@@ -1556,6 +1561,31 @@ export class Player {
       // Omit when unmeasured (humans pre-sample, ordinary bots). Pool pawns set
       // a display-only fake RTT at spawn so the TAB Ping column is populated.
       ping: this.pingMs <= 0 ? undefined : Math.round(this.pingMs),
+    };
+  }
+
+  /** Display name and equipped meshes. Not score, ping, or the founder badge. */
+  private snapshotLook(): Pick<
+    SnapshotPlayer,
+    | "name"
+    | "head"
+    | "visor"
+    | "shoulder"
+    | "body"
+    | "leg"
+    | "hue"
+    | "gunHue"
+    | "pistol"
+    | "rifle"
+    | "shotgun"
+    | "crosshair"
+    | "scope"
+    | "bulletHue"
+    | "crosshairColor"
+    | "nameHue"
+  > {
+    return {
+      name: this.name,
       head: this.headType,
       visor: this.visorType,
       shoulder: this.shoulderType,
