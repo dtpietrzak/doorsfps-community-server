@@ -22,7 +22,7 @@
  *
  * Handoffs: 11.6 `ReplayPlayback.seek` applies the decision then
  * `clock.resetTo`. 14.4 owns pause across a drag and does not seek.
- * 21.4 draws the bar.
+ * 19.5 times `executeReplayScrub`. 21.4 draws the bar.
  */
 
 import type { ReplayRunner } from "./replaySimulationRunner.ts";

@@ -162,6 +162,13 @@ export class ReplaySessionBuffer {
 
   usageTicks = 0;
   usageBytesEstimate = 0;
+  /**
+   * Epic 19.2 — checkpoint-map half of `usageBytesEstimate`.
+   * Moves with every checkpoint put and returns to 0 on discard.
+   * The cap total stays `usageBytesEstimate`. The opening frame on
+   * `init` stays out of this counter.
+   */
+  checkpointBytesEstimate = 0;
   status: ReplaySessionBufferStatus = "recording";
 
   private readonly beforeCommit: (() => void) | null;
@@ -231,10 +238,14 @@ export class ReplaySessionBuffer {
     this.assertMutable();
     const prev = this.checkpoints.get(cp.tick);
     if (prev) {
-      this.usageBytesEstimate -= estimateCheckpointBytes(prev);
+      const prevBytes = estimateCheckpointBytes(prev);
+      this.usageBytesEstimate -= prevBytes;
+      this.checkpointBytesEstimate -= prevBytes;
     }
     this.checkpoints.set(cp.tick, cp);
-    this.usageBytesEstimate += estimateCheckpointBytes(cp);
+    const nextBytes = estimateCheckpointBytes(cp);
+    this.usageBytesEstimate += nextBytes;
+    this.checkpointBytesEstimate += nextBytes;
     if (this.startTick === null) {
       this.startTick = cp.tick;
     }
@@ -320,6 +331,7 @@ export class ReplaySessionBuffer {
     this.checkpoints.clear();
     this.usageTicks = 0;
     this.usageBytesEstimate = 0;
+    this.checkpointBytesEstimate = 0;
     this.startTick = null;
   }
 

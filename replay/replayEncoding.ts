@@ -11,15 +11,21 @@
  * - Streams: input/event/checkpoint rows are arrays of `{ tick, … }` objects
  *   (not keyed maps); event drain order = array order; reserved Index/Integrity
  *   slots are always present (explicit empty), never omitted.
+ *   19.6 drops identity values inside those three sections and the decoder
+ *   restores them before validation (`replaySectionCompression.ts`). The
+ *   row `tick` stays. Header, metadata, initial state, index, and integrity
+ *   are unchanged.
  * - Version-first: decoder reads `header.replayFormatVersion` before deep
  *   validate; missing/unknown → `replay-version-mismatch` via the 10.5 gate
  *   (`isSupportedReplayFormatVersion`). Compatibility policy (migration /
  *   historical sims / support windows) expands in #17.
  * - Tolerance: unknown Metadata (informational) keys ignored; unknown
  *   load-bearing top-level sections / Header keys rejected.
- * - Purity: no filesystem, blob, store, compression, hash, or `net/` imports.
- * - Swap point: 19.6 may replace the byte form (binary/compressed) while keeping
- *   section layout, version-carry, and error names.
+ * - Purity: no filesystem, blob, store, hash, gzip/deflate frame, or `net/`
+ *   imports. The 19.6 packer is structural omission, not a compression frame.
+ * - Section layout, version-carry, and error names stay. 19.6 did not replace
+ *   the document with a binary envelope: range reads and the byte map still
+ *   walk this JSON.
  */
 
 import {
@@ -42,6 +48,14 @@ import {
   isFilledReplayIndex,
   type ReplayIndex,
 } from "./replayIndex.ts";
+import {
+  packCheckpoints,
+  packEventStream,
+  packInputStream,
+  unpackCheckpoints,
+  unpackEventStream,
+  unpackInputStream,
+} from "./replaySectionCompression.ts";
 
 /** Named encoding/decoding failure codes (never raw SyntaxError to callers). */
 export type ReplayEncodingErrorCode =
@@ -218,10 +232,13 @@ function canonicalizeSection(
     case "integrity":
       return canonicalizeIntegrity(value as ReplayContainerIntegrity);
     case "initialState":
-    case "inputStream":
-    case "eventStream":
-    case "checkpoints":
       return canonicalizeValue(value);
+    case "inputStream":
+      return packInputStream(canonicalizeValue(value));
+    case "eventStream":
+      return packEventStream(canonicalizeValue(value));
+    case "checkpoints":
+      return packCheckpoints(canonicalizeValue(value));
   }
 }
 
@@ -414,6 +431,11 @@ export function decodeReplayContainer(bytes: Uint8Array): ReplayContainer {
   ) {
     parsed.metadata = projectMetadata(parsed.metadata as Record<string, unknown>);
   }
+
+  // 19.6: restore identity values before the container validator sees rows.
+  if ("inputStream" in parsed) parsed.inputStream = unpackInputStream(parsed.inputStream);
+  if ("eventStream" in parsed) parsed.eventStream = unpackEventStream(parsed.eventStream);
+  if ("checkpoints" in parsed) parsed.checkpoints = unpackCheckpoints(parsed.checkpoints);
 
   const validated = validateReplayContainer(parsed);
   if (!validated.ok) {

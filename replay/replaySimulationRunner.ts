@@ -34,6 +34,9 @@
  *
  * Raid sessions (`metadata.raidMatch.active === true`) fail closed at
  * create/reset — arena-only scope (notes/replay.md §29.5).
+ * 20.1: `resetToInitial`, `resetToCheckpoint`, and `step` refuse a
+ * manager claimed as the live match before they apply replay bytes.
+ * This runner builds its own manager and does not take the live one.
  * A session the compatibility policy says must not play fails at create,
  * before `resetToInitial` (17.5). An in-memory session with no file
  * format stamp is this process's session.
@@ -63,6 +66,7 @@ import type { MapCollision } from "../world/MapCollision.ts";
 import type { AuthoritativeCheckpoint } from "./authoritativeCheckpoint.ts";
 import type { CheckpointIndexLookup } from "./checkpointIndex.ts";
 import { loadCheckpointState } from "./checkpointLoading.ts";
+import { assertReplayMayWrite } from "./replayIsolation.ts";
 import type { RecordedInitialState } from "./recordedInitialState.ts";
 import type { RecordedActionRow } from "./recordedTickInputs.ts";
 import type { RecordedTickInputs } from "./recordedTickInputs.ts";
@@ -686,6 +690,7 @@ class ReplayRunnerImpl implements ReplayRunner {
     const nowMs = tickNowMs(captureTick);
 
     this.manager = buildManager(this.collision, init);
+    assertReplayMayWrite(this.manager);
 
     if (startCheckpoint) {
       // Full state at captureTick — recordings usually start mid-match, where
@@ -716,6 +721,7 @@ class ReplayRunnerImpl implements ReplayRunner {
 
   resetToCheckpoint(frame: AuthoritativeCheckpoint): void {
     assertArenaSession(this.session.initialState);
+    assertReplayMayWrite(this.manager);
     loadCheckpointState(this.manager, frame, {
       expectedInit: this.session.initialState,
     });
@@ -733,6 +739,7 @@ class ReplayRunnerImpl implements ReplayRunner {
         `step tick ${tick} outside session range [${this.firstTick}, ${this.lastTick}]`,
       );
     }
+    assertReplayMayWrite(this.manager);
 
     const nowMs = tickNowMs(tick);
     const recordedOutcomes: AuthoritativeEvent[] = [];

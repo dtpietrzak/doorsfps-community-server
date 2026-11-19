@@ -11,6 +11,8 @@
  * - Source checkpoint never mutated; manager fully replaced (never merged).
  * - Later epics (9.4 / 9.5 / 11.x / 14.3 / #10 / 18.4) call this loader only —
  *   they do not reimplement restore order or anchor policy.
+ * - 20.1: after validation, a manager claimed as the live match throws
+ *   `replay-isolation-violation` and is not restored.
  */
 
 import type { AuthoritativeMapIdentity } from "../shared/sim/authoritativeEvent.ts";
@@ -22,6 +24,7 @@ import {
   type CheckpointPlayerState,
 } from "./authoritativeCheckpoint.ts";
 import type { RecordedInitialState } from "./recordedInitialState.ts";
+import { assertReplayMayWrite } from "./replayIsolation.ts";
 
 /** Minimal init anchor for chain validation (+ optional roster names). */
 export type CheckpointLoadInit = {
@@ -135,6 +138,7 @@ export function loadCheckpointState(
   options: LoadCheckpointOptions,
 ): void {
   validateCheckpointLoad(checkpoint, options);
+  assertReplayMayWrite(manager);
   manager.restoreFromCheckpoint(checkpoint, nameLookup(options.expectedInit));
 }
 

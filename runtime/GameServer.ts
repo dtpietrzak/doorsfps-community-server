@@ -62,6 +62,7 @@ import type {
   ReplayIntegrationSinkHandle,
 } from "../replay/replayIntegration.ts";
 import { ReplayRecorder } from "../replay/ReplayRecorder.ts";
+import { claimLiveAuthoritative } from "../replay/replayIsolation.ts";
 import {
   type AuthoritativeCheckpoint,
   type CheckpointRaidState,
@@ -404,6 +405,8 @@ export class GameServer implements ReplayIntegrationSinkHandle {
       // Official ranked: start in warm-up lobby until unanimous ready.
       enablePrematch: this.joinMode === "ranked",
     });
+    // 20.1: replay restore and runner ticks must not write this object.
+    claimLiveAuthoritative(this.players);
     this.replay = new ReplayTap({
       players: this.players,
       runtimeMatchId: () => this.runtimeMatchId,

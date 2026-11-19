@@ -12,6 +12,19 @@ import {
   type ReplayTickByteOffset,
 } from "./replayByteMap.ts";
 import type { ReplayContainer } from "./replayContainer.ts";
+import {
+  unpackCheckpoints,
+  unpackEventStream,
+  unpackInputStream,
+} from "./replaySectionCompression.ts";
+
+/** 19.6 stores identity-omitted JSON in the three heavy sections. */
+function logicalSection(key: string, parsed: unknown): unknown {
+  if (key === "inputStream") return unpackInputStream(parsed);
+  if (key === "eventStream") return unpackEventStream(parsed);
+  if (key === "checkpoints") return unpackCheckpoints(parsed);
+  return parsed;
+}
 
 function takeJsonValue(text: string): string {
   let depth = 0;
@@ -66,14 +79,17 @@ Deno.test("16.5 byte map: section spans round-trip a real container", () => {
     const span = map.sections[key];
     if (!span) throw new Error(`missing section ${key}`);
     const slice = new TextDecoder().decode(bytes.subarray(span.start, span.end));
-    assertEquals(JSON.parse(slice), container[key]);
+    assertEquals(logicalSection(key, JSON.parse(slice)), container[key]);
   }
 
   assertEquals(
     map.checkpoints.map((row) => row.tick),
     [12],
   );
-  assertEquals(valueAt(bytes, map.checkpoints[0]!.byteOffset), container.checkpoints[0]);
+  assertEquals(
+    unpackCheckpoints([valueAt(bytes, map.checkpoints[0]!.byteOffset)]),
+    [container.checkpoints[0]],
+  );
   assertEquals(map.inputs.map((row) => row.tick), [12]);
   assertEquals(
     (valueAt(bytes, map.inputs[0]!.byteOffset) as { tick: number }).tick,

@@ -32,7 +32,8 @@
  *
  * Handoffs: 11.6 `ReplayPlayback.seek` applies the plan and the clock;
  * 13.4 opens a killcam window by seeking to `startTick - 1`; 14.4 owns
- * speed; 14.5 decides whether the reload runs; 21.4 draws the bar.
+ * speed; 14.5 decides whether the reload runs; 19.5 times the scrub
+ * apply and does not time this plan; 21.4 draws the bar.
  */
 
 import type { AuthoritativeCheckpoint } from "./authoritativeCheckpoint.ts";

@@ -9,6 +9,10 @@
  * Granularity is the checkpoint, plus the input-stream row at or just before
  * that tick. Section spans cover the eight container sections. A client uses
  * an offset as `Range: bytes=<offset>-`.
+ *
+ * 19.6 omits identity values inside the input, event, and checkpoint
+ * sections. A span still starts at that section's JSON. The logical row is
+ * the unpacked value, not the raw slice.
  */
 
 export const REPLAY_BYTE_MAP_VERSION = 1 as const;

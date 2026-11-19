@@ -28,6 +28,15 @@
  * - 9.5 checkpoint index (see 09-05-checkpoint-indexing.md): each captured
  *   frame is fed into a per-match CheckpointIndex (tick-keyed floor lookup).
  *   Index lives and dies with the recording session; no seek/step/bytes here.
+ * - 19.1 recording CPU (see replayRecordingCost.ts): onTick times its body.
+ *   An active session is the recording bucket; no session is the idle
+ *   baseline. The report is a read. It does not change capture.
+ * - 19.2 recording memory (see replayRecordingMemory.ts): notes the
+ *   session buffer after onTick, init, an external checkpoint, and
+ *   before release. The report is a read. The cap total is unchanged.
+ * - 19.3 replay size (see replaySize.ts): notes one finalized file
+ *   after a non-empty serialize and before upload. The report is a
+ *   read. A thrown note is logged and does not fail the file.
  * - Implements ReplayIntegrationSink; nothing else attaches for recording.
  * - Methods never throw into the game loop (errors → error_count / markFailed).
  */
@@ -77,6 +86,21 @@ import {
   type ReplaySessionBufferOptions,
   type ReplayTailWindow,
 } from "./replaySessionBuffer.ts";
+import {
+  ReplayRecordingCostMeter,
+  type ReplayRecordingCostReport,
+} from "./replayRecordingCost.ts";
+import {
+  REPLAY_RECORDING_MEMORY_IDLE,
+  ReplayRecordingMemoryMeter,
+  sampleReplayBufferMemory,
+  type ReplayRecordingMemoryReport,
+} from "./replayRecordingMemory.ts";
+import {
+  ReplaySizeMeter,
+  sampleReplaySessionSize,
+  type ReplaySizeReport,
+} from "./replaySize.ts";
 
 export type {
   RecordedInitialState,
@@ -236,6 +260,12 @@ export class ReplayRecorder implements ReplayIntegrationSink {
   private noopCount = 0;
   /** Serializes async lifecycle HTTP/DB ops so sink methods stay sync. */
   private persistChain: Promise<void> = Promise.resolve();
+  /** Epic 19.1 — per-onTick wall time. Read via getRecordingCost. */
+  private readonly recordingCost = new ReplayRecordingCostMeter();
+  /** Epic 19.2 — buffer and checkpoint memory. Read via getRecordingMemory. */
+  private readonly recordingMemory = new ReplayRecordingMemoryMeter();
+  /** Epic 19.3 — finalized file size. Read via getReplaySize. */
+  private readonly replaySize = new ReplaySizeMeter();
 
   constructor(deps: ReplayRecorderDeps) {
     this.lifecycle = deps.lifecycle;
@@ -308,6 +338,30 @@ export class ReplayRecorder implements ReplayIntegrationSink {
 
   getNoopCount(): number {
     return this.noopCount;
+  }
+
+  /**
+   * Epic 19.1 — rolling CPU cost of onTick. Reading it does not add a sample
+   * and does not change the recording.
+   */
+  getRecordingCost(): ReplayRecordingCostReport {
+    return this.recordingCost.report();
+  }
+
+  /**
+   * Epic 19.2 — buffer and checkpoint memory. Reading it does not add a
+   * note and does not change the recording.
+   */
+  getRecordingMemory(): ReplayRecordingMemoryReport {
+    return this.recordingMemory.report();
+  }
+
+  /**
+   * Epic 19.3 — size of finalized files. Reading it does not add a note
+   * and does not change the recording.
+   */
+  getReplaySize(): ReplaySizeReport {
+    return this.replaySize.report();
   }
 
   getActiveCounters(): ReplayCounterPatch | null {
@@ -512,6 +566,8 @@ export class ReplayRecorder implements ReplayIntegrationSink {
         checkpointIndex: new CheckpointIndex(),
       };
 
+      this.noteRecordingMemory();
+
       this.enqueuePersist(async () => {
         const existing = await this.lifecycle.getByRuntimeMatchId(
           runtimeMatchId,
@@ -530,8 +586,9 @@ export class ReplayRecorder implements ReplayIntegrationSink {
           }
           // Non-recording existing row: drop local session.
           if (this.active?.runtimeMatchId === runtimeMatchId) {
-            this.active.buffer.discard();
+            const buffer = this.active.buffer;
             this.active = null;
+            this.releaseHeldBuffer(buffer);
             this.noopCount++;
           }
           return;
@@ -585,6 +642,7 @@ export class ReplayRecorder implements ReplayIntegrationSink {
         await this.completeFinalizationAsync(rowId);
       });
     }, { lifecycle: true });
+    this.noteRecordingMemory();
     void parked;
   }
 
@@ -601,9 +659,10 @@ export class ReplayRecorder implements ReplayIntegrationSink {
         const runtimeMatchId = this.active.runtimeMatchId;
         const pendingRowId = this.active.rowId;
         this.active.buffer.markFailed();
-        this.active.buffer.discard();
-        this.discardPendingFinalize();
+        const buffer = this.active.buffer;
         this.active = null;
+        this.releaseHeldBuffer(buffer);
+        this.discardPendingFinalize();
         this.detach();
         this.enqueuePersist(async () => {
           const rowId = await this.resolveRowId(runtimeMatchId, pendingRowId);
@@ -686,6 +745,10 @@ export class ReplayRecorder implements ReplayIntegrationSink {
         );
         return;
       }
+
+      // 19.3: the bytes exist. A failed upload still keeps the note.
+      // A thrown note must not fail a file that serialized.
+      this.noteReplaySize(session, bytes.byteLength);
 
       try {
         await this.lifecycle.finalize({
@@ -770,6 +833,7 @@ export class ReplayRecorder implements ReplayIntegrationSink {
       const tick = payload.initEvent.appliedTick;
       this.active.initTick = tick;
       this.recordInit(payload);
+      this.noteRecordingMemory();
     }, { lifecycle: true });
   }
 
@@ -812,23 +876,33 @@ export class ReplayRecorder implements ReplayIntegrationSink {
 
   onTick(payload: Readonly<ReplayTickPayload>): void {
     this.safe("onTick", () => {
-      if (!this.active) return;
-      this.active.ticksObserved++;
-      this.active.inputTicks++;
-      this.active.eventTicks++;
-      this.recordInputs(payload);
-      this.recordEvents(payload);
-      // 8.5: O(1) commit + cap/duration check. Fail loud immediately — never
-      // leave a truncated session readable as finalizable. Loop never waits.
-      const commit = this.active.buffer.commitTick();
-      if (!commit.ok) {
-        this.failActiveRow(commit.reason);
-        return;
+      // 19.1: time the body only. The flag is the session that exists
+      // before the body runs. A throw still leaves a sample; safe() still
+      // owns the error. The clock lives in the meter, not here.
+      // 19.2 notes after that clock sample.
+      try {
+        this.recordingCost.measure(this.active != null, () => {
+          if (!this.active) return;
+          this.active.ticksObserved++;
+          this.active.inputTicks++;
+          this.active.eventTicks++;
+          this.recordInputs(payload);
+          this.recordEvents(payload);
+          // 8.5: O(1) commit + cap/duration check. Fail loud immediately — never
+          // leave a truncated session readable as finalizable. Loop never waits.
+          const commit = this.active.buffer.commitTick();
+          if (!commit.ok) {
+            this.failActiveRow(commit.reason);
+            return;
+          }
+          this.active.consecutiveTickErrors = 0;
+          // 9.2: post-drain boundary (onTick is fanned out after 7.3 drain).
+          // Off-schedule: O(1) modulo/anchor check only.
+          this.maybeCaptureCheckpoint(payload.tick);
+        });
+      } finally {
+        this.noteRecordingMemory();
       }
-      this.active.consecutiveTickErrors = 0;
-      // 9.2: post-drain boundary (onTick is fanned out after 7.3 drain).
-      // Off-schedule: O(1) modulo/anchor check only.
-      this.maybeCaptureCheckpoint(payload.tick);
     }, { tick: true });
   }
 
@@ -836,6 +910,7 @@ export class ReplayRecorder implements ReplayIntegrationSink {
     this.safe("onCheckpoint", () => {
       if (!this.active) return;
       this.recordCheckpoint(payload);
+      this.noteRecordingMemory();
     });
   }
 
@@ -1081,9 +1156,10 @@ export class ReplayRecorder implements ReplayIntegrationSink {
     const runtimeMatchId = this.active.runtimeMatchId;
     const pendingRowId = this.active.rowId;
     this.active.buffer.markFailed();
-    this.active.buffer.discard();
-    this.discardPendingFinalize();
+    const buffer = this.active.buffer;
     this.active = null;
+    this.releaseHeldBuffer(buffer);
+    this.discardPendingFinalize();
     this.enqueuePersist(async () => {
       const rowId = await this.resolveRowId(runtimeMatchId, pendingRowId);
       if (rowId == null) return;
@@ -1129,9 +1205,10 @@ export class ReplayRecorder implements ReplayIntegrationSink {
     const runtimeMatchId = this.active.runtimeMatchId;
     const pendingRowId = this.active.rowId;
     this.active.buffer.markFailed();
-    this.active.buffer.discard();
-    this.discardPendingFinalize();
+    const buffer = this.active.buffer;
     this.active = null;
+    this.releaseHeldBuffer(buffer);
+    this.discardPendingFinalize();
     this.detach();
     this.enqueuePersist(async () => {
       try {
@@ -1167,8 +1244,51 @@ export class ReplayRecorder implements ReplayIntegrationSink {
 
   private discardPendingFinalize(): void {
     if (!this.pendingFinalize) return;
-    this.pendingFinalize.discard();
+    const buffer = this.pendingFinalize;
     this.pendingFinalize = null;
+    this.releaseHeldBuffer(buffer);
+  }
+
+  /**
+   * Epic 19.3 — one finalized file. Measurement must not fail the upload.
+   */
+  private noteReplaySize(
+    session: ReplayBufferedSessionView,
+    fileBytes: number,
+  ): void {
+    try {
+      this.replaySize.note(sampleReplaySessionSize(session, fileBytes));
+    } catch (err) {
+      console.error("[replay-recorder] replay size note failed:", err);
+    }
+  }
+
+  /**
+   * Epic 19.2 — one reading of the buffer still held (active, else the
+   * parked finalizing buffer). No buffer notes the idle sample.
+   */
+  private noteRecordingMemory(): void {
+    const buffer = this.active?.buffer ?? this.pendingFinalize;
+    if (!buffer || buffer.status === "discarded") {
+      this.recordingMemory.note(REPLAY_RECORDING_MEMORY_IDLE);
+      return;
+    }
+    this.recordingMemory.note(sampleReplayBufferMemory(buffer));
+  }
+
+  /**
+   * Epic 19.2 — note the bytes, drop them, then note idle so current
+   * follows the release. A rejected reading still drops the buffer.
+   */
+  private releaseHeldBuffer(buffer: ReplaySessionBuffer): void {
+    if (buffer.status !== "discarded") {
+      try {
+        this.recordingMemory.note(sampleReplayBufferMemory(buffer));
+      } finally {
+        buffer.discard();
+      }
+    }
+    this.recordingMemory.note(REPLAY_RECORDING_MEMORY_IDLE);
   }
 }
 

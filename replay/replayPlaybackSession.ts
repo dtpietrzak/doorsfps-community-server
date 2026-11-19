@@ -28,7 +28,11 @@
  * - End clamps via the clock; no wrap, no over-step, no auto-restart.
  * - Raid rejection surfaces unchanged from createReplayRunner / resetToInitial.
  * - Caller owns the frame loop and supplies dtWallMs (scan-locked: no wall
- *   clock reads, no rAF/timers, no fs/blob/store/net imports).
+ *   clock reads, no rAF/timers, no fs/blob/store/net imports). 19.4 times
+ *   each `runner.step` inside `frame` through the playback-cost meter.
+ *   19.5 times `executeReplayScrub` inside `seek`. Those steps are not
+ *   playback-cost samples. The floor plan, the clock park, and the
+ *   projection stay outside the seek sample.
  *
  * Handoffs: 12.x selection/cameras (12.3 reads focusedDisplay()); 13.x death
  * framing; 14.1 reads `timeline` and 14.2 reads `eventMarkers` (presentation
@@ -51,6 +55,10 @@ import {
   type ReplayClock,
   type ReplaySpeed,
 } from "./replayClock.ts";
+import {
+  ReplayPlaybackCostMeter,
+  type ReplayPlaybackCostReport,
+} from "./replayPlaybackCost.ts";
 import {
   armReplaySpeed,
   beginReplaySpeedScrub,
@@ -76,6 +84,10 @@ import {
   type ReplaySeekResult,
   resolveReplaySeekTick,
 } from "./replaySeek.ts";
+import {
+  ReplaySeekLatencyMeter,
+  type ReplaySeekLatencyReport,
+} from "./replaySeekLatency.ts";
 import { executeReplayScrub, planReplayScrub } from "./replayScrub.ts";
 import { type ReplayTimeline, replayTimeline } from "./replayTimeline.ts";
 import {
@@ -183,6 +195,17 @@ export type ReplayPlayback = {
   start(): void;
   /** advance → step → project. Caller supplies wall delta; no internal timers. */
   frame(dtWallMs: number): ReplayPlaybackFrameResult;
+  /**
+   * Epic 19.4 — CPU cost of `runner.step` inside `frame`. Reading it
+   * does not step, seek, or change the cursor.
+   */
+  getPlaybackCost(): ReplayPlaybackCostReport;
+  /**
+   * Epic 19.5 — latency of `executeReplayScrub` inside `seek`. Reading
+   * it does not step, seek, or change the cursor. `start()` does not
+   * clear it.
+   */
+  getSeekLatency(): ReplaySeekLatencyReport;
   setPaused(paused: boolean): void;
   /**
    * Arm a ladder speed. Invalid values fail. Carry clears. Pause and a
@@ -347,6 +370,10 @@ class ReplayPlaybackImpl implements ReplayPlayback {
   /** 14.4 drag. The clock is paused for the hold; this remembers resume. */
   private scrubbing = false;
   private pausedBeforeScrub: boolean | null = null;
+  /** Epic 19.4 — one sample per frame() simulation step. Read via getPlaybackCost. */
+  private readonly playbackCost = new ReplayPlaybackCostMeter();
+  /** Epic 19.5 — one sample per seek() scrub. Read via getSeekLatency. */
+  private readonly seekLatency = new ReplaySeekLatencyMeter();
 
   constructor(session: ReplayRunSession, options: CreateReplayPlaybackOptions) {
     this.session = session;
@@ -450,7 +477,11 @@ class ReplayPlaybackImpl implements ReplayPlayback {
     let steppedTo = advance.fromTick - 1;
     try {
       for (let tick = advance.fromTick; tick < advance.toTick; tick++) {
-        this.runner.step(tick);
+        // 19.4: time the sim step only. A throw still leaves a sample;
+        // this catch still resyncs the clock. The clock lives in the meter.
+        this.playbackCost.measure(() => {
+          this.runner.step(tick);
+        });
         steppedTo = tick;
         this.prevView = this.currView;
         this.currView = viewFromRunner(this.runner);
@@ -474,6 +505,22 @@ class ReplayPlaybackImpl implements ReplayPlayback {
       snapshot,
       feed,
     };
+  }
+
+  /**
+   * Epic 19.4 — simulation cost of this playback. Reading it does not
+   * add a sample and does not change the cursor.
+   */
+  getPlaybackCost(): ReplayPlaybackCostReport {
+    return this.playbackCost.report();
+  }
+
+  /**
+   * Epic 19.5 — latency of seeks on this playback. Reading it does not
+   * add a sample and does not change the cursor.
+   */
+  getSeekLatency(): ReplaySeekLatencyReport {
+    return this.seekLatency.report();
   }
 
   setPaused(paused: boolean): void {
@@ -549,6 +596,7 @@ class ReplayPlaybackImpl implements ReplayPlayback {
   /**
    * Floor, then continue or load, then park the clock on that completed
    * tick. 14.5 skips the reload when the cursor is already in range.
+   * 19.5 times the scrub only.
    */
   private seekResolved(
     target: { readonly tick: number } | { readonly timeMs: number },
@@ -567,16 +615,24 @@ class ReplayPlaybackImpl implements ReplayPlayback {
     );
     const scrub = planReplayScrub(floor, this.runner.currentTick);
     try {
-      executeReplayScrub(this.runner, scrub, {
-        onAnchored: () => {
-          this.prevView = null;
-          this.currView = viewFromRunner(this.runner);
+      // 19.5: time the scrub only. A throw still leaves a sample for
+      // the plan; this catch still resyncs the clock. The view copies
+      // ride the scrub hooks. The clock lives in the meter.
+      this.seekLatency.measure(
+        { steps: scrub.steps, resumed: scrub.resumed },
+        () => {
+          executeReplayScrub(this.runner, scrub, {
+            onAnchored: () => {
+              this.prevView = null;
+              this.currView = viewFromRunner(this.runner);
+            },
+            onStepped: () => {
+              this.prevView = this.currView;
+              this.currView = viewFromRunner(this.runner);
+            },
+          });
         },
-        onStepped: () => {
-          this.prevView = this.currView;
-          this.currView = viewFromRunner(this.runner);
-        },
-      });
+      );
     } catch (err) {
       this.resyncClockToRunner();
       throw err;
