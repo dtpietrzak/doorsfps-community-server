@@ -15,6 +15,7 @@ import {
   captureCheckpointState,
   type CheckpointRaidState,
 } from "../replay/authoritativeCheckpoint.ts";
+import { replayAccessAccountId } from "../replay/replayAccess.ts";
 import { isReplayRecordingEnabled } from "../replay/recordingEnabled.ts";
 import type { ReplayLifecycleClient } from "../replay/replayLifecycleClient.ts";
 import { ReplayRecorder } from "../replay/ReplayRecorder.ts";
@@ -58,6 +59,12 @@ export class ReplayTap {
    * Later (public): record always, discard on finalize if no human joined.
    */
   private matchHadHuman = false;
+  /**
+   * Epic 20.4 — real human account ids seen while this match was current.
+   * Cleared on identity rotation. Copied onto the recorder at match end.
+   * Not written into the replay file.
+   */
+  private accessAccountIds = new Set<string>();
   /**
    * Counts sink payload construction (inputs map / init / checkpoint notify).
    * Used by tests to prove the no-sink fast path does zero extra work.
@@ -159,6 +166,7 @@ export class ReplayTap {
   }
 
   onIdentityRotated(previousRuntimeMatchId: string, tick: number): void {
+    this.accessAccountIds.clear();
     // Epic 8.1: re-attach after finalize detach so rotation/init notifies land.
     this.recorder?.ensureAttached();
     // Skip bot-only and all-synthetic matches. Sticky once a real human
@@ -176,11 +184,44 @@ export class ReplayTap {
 
   /** True when a non-synthetic human is on the roster. */
   private hasRecordableHuman(): boolean {
+    let human = false;
     for (const player of this.deps.players.all()) {
+      this.rememberAccessCandidate(player);
       if (player.isBot || player.isAgent) continue;
-      if (!player.synthetic) return true;
+      if (!player.synthetic) human = true;
     }
-    return false;
+    return human;
+  }
+
+  /** Keep a real human account for the current match. Leavers stay. */
+  private rememberAccessCandidate(player: {
+    accountUserId?: string | null;
+    isBot?: boolean;
+    isAgent?: boolean;
+    synthetic?: boolean;
+    poolAccount?: boolean;
+  }): void {
+    const id = replayAccessAccountId(player);
+    if (id) this.accessAccountIds.add(id);
+  }
+
+  private rememberRoster(): void {
+    for (const player of this.deps.players.all()) {
+      this.rememberAccessCandidate(player);
+    }
+  }
+
+  /**
+   * Hand the accumulated accounts to the recorder that will finalize.
+   * Production sets `recorder`. Tests that only attach the recorder as
+   * the sink still reach it.
+   */
+  private noteMatchAccess(matchId: string): void {
+    const recorder = this.recorder ??
+      (this.sink instanceof ReplayRecorder ? this.sink : null);
+    if (!recorder) return;
+    if (recorder.getActiveRuntimeMatchId() !== matchId) return;
+    recorder.noteAccessAccounts(matchId, [...this.accessAccountIds]);
   }
 
   /**
@@ -292,6 +333,8 @@ export class ReplayTap {
   notifyMatchEnded(packet: GameOverPacket, tick: number): void {
     const sink = this.sink;
     if (!sink) return;
+    this.rememberRoster();
+    this.noteMatchAccess(this.deps.runtimeMatchId());
     // Bot-only matches never opened a row; recorder beginFinalize no-ops.
     // Still fan out so non-recorder sinks (and tests) observe the end.
     this.payloadConstructionCount++;
@@ -337,6 +380,7 @@ export class ReplayTap {
     const inputs = new Map<string, TickSelectedInput | null>();
     for (const p of this.deps.players.all()) {
       inputs.set(p.id, p.lastTickInputSelection());
+      this.rememberAccessCandidate(p);
     }
     Object.freeze(inputs);
     // Drain action notes accumulated at handle* since the prior fan-out

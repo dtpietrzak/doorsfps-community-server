@@ -3,7 +3,7 @@
  *
  * The four visibility states, and whether an audience may read a clip.
  * Audiences are inputs. This module does not look up an owner, a link,
- * or a user. Enforcement is 20.4.
+ * or a user. 20.4 names the caller and calls this matrix.
  *
  * ```text
  * visibility × audience → { catalog, readable }

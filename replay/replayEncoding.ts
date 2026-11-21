@@ -23,6 +23,9 @@
  *   load-bearing top-level sections / Header keys rejected.
  * - Purity: no filesystem, blob, store, hash, gzip/deflate frame, or `net/`
  *   imports. The 19.6 packer is structural omission, not a compression frame.
+ * - 20.3: account keys and a non-null `socketId` are refused on encode
+ *   before bytes are written, and on decode after the version gate,
+ *   before unknown metadata keys are dropped.
  * - Section layout, version-carry, and error names stay. 19.6 did not replace
  *   the document with a binary envelope: range reads and the byte map still
  *   walk this JSON.
@@ -32,6 +35,7 @@ import {
   isSupportedReplayFormatVersion,
   REPLAY_FORMAT_VERSION,
 } from "../shared/replay/replayFormatVersion.ts";
+import { assertReplayDataBoundary } from "./replayDataBoundary.ts";
 import { deepFreeze } from "./recordedInitialState.ts";
 import {
   REPLAY_CONTAINER_SECTION_ORDER,
@@ -247,6 +251,8 @@ function canonicalizeSection(
  * Never mutates `container`. Compact form only — no caller formatting options.
  */
 export function encodeReplayContainer(container: ReplayContainer): Uint8Array {
+  // 20.3: refuse account keys and a live socket id before any bytes exist.
+  assertReplayDataBoundary(container);
   const doc: Record<string, unknown> = {};
   for (const section of REPLAY_CONTAINER_SECTION_ORDER) {
     doc[section] = canonicalizeSection(section, container[section]);
@@ -396,8 +402,9 @@ function mapValidateReason(reason: string): ReplayEncodingError {
 
 /**
  * Decode canonical v1 UTF-8 JSON bytes to a frozen validated container.
- * Version is checked before deep stream validation; failures use the named
- * taxonomy only (never a raw SyntaxError / partial container).
+ * Version is checked before deep stream validation. Encoding failures use
+ * the named taxonomy only (never a raw SyntaxError / partial container).
+ * 20.3 throws `replay-data-boundary` after that version gate.
  */
 export function decodeReplayContainer(bytes: Uint8Array): ReplayContainer {
   const text = decodeUtf8(bytes);
@@ -412,6 +419,9 @@ export function decodeReplayContainer(bytes: Uint8Array): ReplayContainer {
       { section: "header", detail: `got=${version}` },
     );
   }
+
+  // 20.3: before unknown metadata keys are dropped, and before 19.6 unpack.
+  assertReplayDataBoundary(parsed);
 
   rejectUnknownSections(parsed);
 

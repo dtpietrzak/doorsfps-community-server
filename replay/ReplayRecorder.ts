@@ -266,6 +266,11 @@ export class ReplayRecorder implements ReplayIntegrationSink {
   private readonly recordingMemory = new ReplayRecordingMemoryMeter();
   /** Epic 19.3 — finalized file size. Read via getReplaySize. */
   private readonly replaySize = new ReplaySizeMeter();
+  /**
+   * Epic 20.4 — real human account ids for the finalize upload.
+   * Keyed by runtimeMatchId. Never copied into the session buffer.
+   */
+  private readonly accessByMatch = new Map<string, readonly string[]>();
 
   constructor(deps: ReplayRecorderDeps) {
     this.lifecycle = deps.lifecycle;
@@ -319,6 +324,31 @@ export class ReplayRecorder implements ReplayIntegrationSink {
 
   getActiveRuntimeMatchId(): string | null {
     return this.active?.runtimeMatchId ?? null;
+  }
+
+  /**
+   * Epic 20.4 — account ids to send beside the file bytes.
+   * Empty clears a previous note for this match. The session buffer
+   * does not store them.
+   */
+  noteAccessAccounts(
+    runtimeMatchId: string,
+    accountIds: readonly string[],
+  ): void {
+    if (!runtimeMatchId) return;
+    if (accountIds.length === 0) {
+      this.accessByMatch.delete(runtimeMatchId);
+      return;
+    }
+    this.accessByMatch.set(runtimeMatchId, accountIds);
+  }
+
+  private takeAccessAccounts(
+    runtimeMatchId: string,
+  ): readonly string[] | undefined {
+    const ids = this.accessByMatch.get(runtimeMatchId);
+    this.accessByMatch.delete(runtimeMatchId);
+    return ids && ids.length > 0 ? ids : undefined;
   }
 
   /**
@@ -657,6 +687,7 @@ export class ReplayRecorder implements ReplayIntegrationSink {
       if (this.active) {
         const counters = this.counterPatch();
         const runtimeMatchId = this.active.runtimeMatchId;
+        this.accessByMatch.delete(runtimeMatchId);
         const pendingRowId = this.active.rowId;
         this.active.buffer.markFailed();
         const buffer = this.active.buffer;
@@ -677,6 +708,7 @@ export class ReplayRecorder implements ReplayIntegrationSink {
       }
       if (this.pendingFinalize) {
         const runtimeMatchId = this.pendingFinalize.runtimeMatchId;
+        this.accessByMatch.delete(runtimeMatchId);
         this.pendingFinalize.markFailed();
         this.discardPendingFinalize();
         this.enqueuePersist(async () => {
@@ -751,10 +783,12 @@ export class ReplayRecorder implements ReplayIntegrationSink {
       this.noteReplaySize(session, bytes.byteLength);
 
       try {
+        const accessAccountIds = this.takeAccessAccounts(session.runtimeMatchId);
         await this.lifecycle.finalize({
           rowId,
           runtimeMatchId: session.runtimeMatchId,
           bytes,
+          ...(accessAccountIds ? { accessAccountIds } : {}),
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -789,6 +823,7 @@ export class ReplayRecorder implements ReplayIntegrationSink {
   ): Promise<void> {
     const note = truncateError(reason);
     if (this.pendingFinalize) {
+      this.accessByMatch.delete(this.pendingFinalize.runtimeMatchId);
       this.pendingFinalize.markFailed();
       this.discardPendingFinalize();
     }

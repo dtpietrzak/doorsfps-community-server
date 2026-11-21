@@ -15,8 +15,9 @@
  *       (blend via 11.5 → 11.4; u = clock.carryMs / TICK_MS)
  *
  * Contract (see notes/replay/11-replay-playback/11-06-basic-replay-start.md):
- * - Thin orchestrator: calls 11.1–11.5 public APIs only; never re-validates,
- *   re-counts, re-blends, or hand-shapes packets.
+ * - Thin orchestrator: bytes go through 20.2, which calls 11.1. This
+ *   module does not decode. It does not re-count, re-blend, or hand-shape
+ *   packets. An in-memory session is not re-validated.
  * - Bytes *or* session entry; load/decode at most once (never per frame).
  * - Start = resetToInitial + fresh virgin clock + initial projection.
  *   Double-start is an idempotent restart (full reset), never a partial resume.
@@ -76,8 +77,8 @@ import { isFilledReplayIndex, type ReplayIndexMarker } from "./replayIndex.ts";
 import {
   isLoadedReplay,
   type LoadedReplay,
-  loadReplay,
 } from "./replayLoader.ts";
+import { acceptReplayBytes } from "./replayValidation.ts";
 import {
   planReplaySeek,
   replaySeekFloor,
@@ -304,7 +305,8 @@ function fileIndexMarkers(
 
 function resolveSession(input: ReplayPlaybackInput): ReplayRunSession {
   if (isUint8Array(input)) {
-    return loadReplay(input);
+    // 20.2: malformed or invalid bytes throw before a session exists.
+    return acceptReplayBytes(input);
   }
   return input;
 }
@@ -809,8 +811,9 @@ class ReplayPlaybackImpl implements ReplayPlayback {
 }
 
 /**
- * Create a playback session over bytes (load once via 11.1) or a runner-shaped
- * session. Collision is injected; focus defaults at `start()` when omitted.
+ * Create a playback session over bytes (20.2, which calls 11.1) or a
+ * runner-shaped session. Collision is injected; focus defaults at
+ * `start()` when omitted. An in-memory session is not re-validated.
  */
 export function createReplayPlayback(
   input: ReplayPlaybackInput,

@@ -22,6 +22,7 @@
  *   before-first/empty → miss; at/after-last → last; never clamp-forward).
  * - Index: file's ReplayIndex / empty-reserved slot, never rebuilt here.
  * - Integrity: opaque passthrough; always `integrityStatus: "unverified"` until 10.4.
+ *   20.6 checks the SQL checksum when the file is served and does not fill this trailer.
  * - Bytes in, session out: no paths, URLs, stores, blob, fs, net, sim, or render.
  * - Sim-free: never constructs PlayerManager, never applies checkpoints, never steps.
  *
@@ -30,7 +31,10 @@
  *
  * Handoffs: 11.2 consumes inputAt/eventsAt/initialState/checkpoints; 11.3 uses
  * tick range + tick↔time helpers; 11.6 orchestrates start; 14.3 uses floor lookup;
- * 16.x supplies bytes; 18.x/20.x consume load gates. None of those live here.
+ * 16.x supplies bytes; 18.x consumes load gates. 20.2 classifies the errors
+ * thrown here and does not change them. Decode throws `replay-data-boundary`
+ * (20.3) when the file carries an account key or a live socket id. None of
+ * those live here.
  */
 
 import type { AuthoritativeEvent } from "../shared/sim/authoritativeEvent.ts";

@@ -152,7 +152,9 @@ export function deriveConnectionStatus(
     appliedTick,
     playerId: player.id,
     connectionIssue: opts.connectionIssue,
-    socketId: player.socketId,
+    // 20.3: the live transport handle stays on Player. The recording
+    // keeps the match id, not this socket.
+    socketId: null,
     respawned: opts.respawned,
     player: rosterSnapshotFromPlayer(player),
   });

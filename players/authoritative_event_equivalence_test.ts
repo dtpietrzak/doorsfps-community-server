@@ -178,8 +178,9 @@ Deno.test("equivalence: connection issue + restore", () => {
   assertEquals(kinds(restEv), ["connectionStatus"]);
   if (restEv[0]?.kind === "connectionStatus") {
     assertEquals(restEv[0].connectionIssue, false);
-    assertEquals(restEv[0].socketId, "sock-new");
+    assertEquals(restEv[0].socketId, null);
   }
+  assertEquals(pm.get("h1")!.socketId, "sock-new");
   assertEquals(pm.get("h1")!.connectionIssue, false);
 });
 

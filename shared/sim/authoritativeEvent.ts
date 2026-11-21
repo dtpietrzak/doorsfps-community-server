@@ -250,7 +250,10 @@ export type ConnectionStatusEvent = {
   playerId: string;
   /** Resulting connection-issue flag after the transition. */
   connectionIssue: boolean;
-  /** Transport socket after restore; null while issued / for bots. */
+  /**
+   * Live transport handle. Recordings write null (20.3). A non-null
+   * value is rejected at encode and at load. Null is the 19.6 identity.
+   */
   socketId: string | null;
   /** True when reconnect also triggered a door-open respawn. */
   respawned: boolean;

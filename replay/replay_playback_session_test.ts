@@ -1133,8 +1133,9 @@ Deno.test("11.6 source-scan: no wall-clock / fs / blob / store / net / lerp / va
   assertEquals(/BotManager/.test(src), false);
   assertEquals(/beginLiveMatch/.test(src), false);
   assertEquals(/GameServer/.test(src), false);
-  // Allowed owners only via public imports.
-  assertEquals(src.includes("loadReplay"), true);
+  // Allowed owners only via public imports. 20.2 is the byte door.
+  assertEquals(src.includes("acceptReplayBytes"), true);
+  assertEquals(src.includes("loadReplay"), false);
   assertEquals(src.includes("createReplayRunner"), true);
   assertEquals(src.includes("createReplayClock"), true);
   assertEquals(src.includes("replayTimeline"), true);

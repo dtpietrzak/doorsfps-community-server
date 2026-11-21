@@ -17,6 +17,10 @@ import {
   type ReplayBlobStore,
   replayBlobObjectName,
 } from "./ReplayBlobStore.ts";
+import {
+  REPLAY_ACCESS_HEADER,
+  replayAccessHeaderValue,
+} from "./replayAccess.ts";
 
 export type {
   ReplayCounterPatch,
@@ -46,6 +50,11 @@ export interface ReplayLifecycleClient {
     rowId: number;
     runtimeMatchId: string;
     bytes: Uint8Array;
+    /**
+     * Real human account ids for 20.4. Not written into `bytes`.
+     * Absent when the match had no account-linked human.
+     */
+    accessAccountIds?: readonly string[];
   }): Promise<ReplayFinalizeResult>;
 }
 
@@ -67,6 +76,8 @@ export class InMemoryReplayLifecycleClient implements ReplayLifecycleClient {
   #nextId = 1;
   #blobStore: ReplayBlobStore | undefined;
   #memoryBytes = new Map<number, Uint8Array>();
+  /** 20.4 account ids from the last finalize for this row. Not file bytes. */
+  #accessAccounts = new Map<number, readonly string[]>();
   #now: () => string;
 
   constructor(opts: InMemoryReplayLifecycleClientOptions = {}) {
@@ -83,6 +94,11 @@ export class InMemoryReplayLifecycleClient implements ReplayLifecycleClient {
   /** Test helper: bytes retained when no blobStore. */
   getMemoryBytes(rowId: number): Uint8Array | null {
     return this.#memoryBytes.get(rowId) ?? null;
+  }
+
+  /** Test helper: 20.4 account ids passed to finalize, or null. */
+  getAccessAccountIds(rowId: number): readonly string[] | null {
+    return this.#accessAccounts.get(rowId) ?? null;
   }
 
   // deno-lint-ignore require-await -- async keeps throws as rejections
@@ -153,7 +169,11 @@ export class InMemoryReplayLifecycleClient implements ReplayLifecycleClient {
     rowId: number;
     runtimeMatchId: string;
     bytes: Uint8Array;
+    accessAccountIds?: readonly string[];
   }): Promise<ReplayFinalizeResult> {
+    if (args.accessAccountIds && args.accessAccountIds.length > 0) {
+      this.#accessAccounts.set(args.rowId, args.accessAccountIds);
+    }
     const row = this.#rows.get(args.rowId);
     if (!row) throw new Error(`replay row ${args.rowId} not found`);
     if (row.status !== "finalizing") {
@@ -315,6 +335,7 @@ export class HttpReplayLifecycleClient implements ReplayLifecycleClient {
     rowId: number;
     runtimeMatchId: string;
     bytes: Uint8Array;
+    accessAccountIds?: readonly string[];
   }): Promise<ReplayFinalizeResult> {
     const q = new URLSearchParams({
       ...this.#identity(),
@@ -324,6 +345,7 @@ export class HttpReplayLifecycleClient implements ReplayLifecycleClient {
       "POST",
       `/api/replays/${args.rowId}/finalize?${q}`,
       args.bytes,
+      replayAccessHeaderValue(args.accessAccountIds),
     );
     const fileSizeBytes = Number(data.fileSizeBytes);
     if (!Number.isFinite(fileSizeBytes) || fileSizeBytes <= 0) {
@@ -381,6 +403,7 @@ export class HttpReplayLifecycleClient implements ReplayLifecycleClient {
     method: string,
     path: string,
     bytes: Uint8Array,
+    accessHeader: string | null,
   ): Promise<Record<string, unknown>> {
     const controller = new AbortController();
     const timeout = setTimeout(
@@ -397,6 +420,7 @@ export class HttpReplayLifecycleClient implements ReplayLifecycleClient {
           "content-type": "application/octet-stream",
           authorization: `Bearer ${this.#credential.secret}`,
           "x-doors-credential-id": this.#credential.id,
+          ...(accessHeader ? { [REPLAY_ACCESS_HEADER]: accessHeader } : {}),
         },
         body: bytes.buffer.slice(
           bytes.byteOffset,

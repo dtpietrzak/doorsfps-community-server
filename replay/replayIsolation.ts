@@ -15,7 +15,7 @@
  *
  * Claim is idempotent. Release clears it. The registry is a `WeakSet`:
  * dropping the server drops the claim. No clock, no file, no encode.
- * Validation of malformed bytes is 20.2. Who may fetch a file is 20.4.
+ * Validation of malformed bytes is 20.2. 20.4 gates who may fetch a file.
  * The status page is 23.4.
  */
 
