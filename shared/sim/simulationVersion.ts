@@ -14,7 +14,10 @@
  * a historical simulation and is not played here. Loading a file that
  * would resimulate under this version and come out wrong fails
  * (`replay-incompatible`, 17.5).
+ *
+ * 1: initial ruleset (spawn protection 1000 ms).
+ * 2: spawn protection 500 ms.
  */
-export const SIMULATION_VERSION = 1 as const;
+export const SIMULATION_VERSION = 2 as const;
 
 export type SimulationVersion = typeof SIMULATION_VERSION;

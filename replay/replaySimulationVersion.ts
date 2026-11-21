@@ -55,13 +55,17 @@ export type ReplaySimulationVersionEntry = {
 };
 
 /**
- * Known simulation versions. One row: the writer version. No older numbered
- * ruleset exists, so there is no previous row. 17.4 treats a previous class
- * as a historical simulation and does not register one. The row does not
- * by itself make the file load or refuse to load.
+ * Known simulation versions, strictly ascending. `current` is the writer
+ * version. `previous` is a catalogued older ruleset. 17.4 treats a previous
+ * class as a historical simulation and does not register one. The row does
+ * not by itself make the file load or refuse to load.
  */
 export const REPLAY_SIMULATION_VERSIONS:
   readonly ReplaySimulationVersionEntry[] = Object.freeze([
+    Object.freeze({
+      version: 1,
+      role: "previous",
+    }),
     Object.freeze({
       version: SIMULATION_VERSION,
       role: "current",

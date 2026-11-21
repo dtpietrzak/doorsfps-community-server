@@ -35,8 +35,12 @@ function rewrite(
 }
 
 Deno.test("17.2 stamp: the writer version is its own constant", async () => {
-  assertEquals(SIMULATION_VERSION, 1);
-  assertEquals(REPLAY_SIMULATION_VERSIONS[0]?.version, SIMULATION_VERSION);
+  assertEquals(SIMULATION_VERSION, 2);
+  assertEquals(
+    REPLAY_SIMULATION_VERSIONS.find((row) => row.role === "current")?.version,
+    SIMULATION_VERSION,
+  );
+  assertEquals(classifyReplaySimulationVersion(1), "previous");
   assertEquals(replayFormatBumpOwner("simulation").stamp, "SIMULATION_VERSION");
   assertEquals(replayFormatBumpOwner("simulation").bumpsFormatVersion, false);
 
@@ -100,20 +104,20 @@ Deno.test("17.2 record: another simulation version is kept and not treated as cu
         string,
         unknown
       >;
-    (doc.metadata as Record<string, unknown>).simulationVersion = 2;
-    initMeta.simulationVersion = 2;
+    (doc.metadata as Record<string, unknown>).simulationVersion = 99;
+    initMeta.simulationVersion = 99;
     (doc.metadata as Record<string, unknown>).gameProto = 99;
     initMeta.gameProto = 99;
   }));
-  assertEquals(decoded.metadata.simulationVersion, 2);
+  assertEquals(decoded.metadata.simulationVersion, 99);
   assertEquals(decoded.metadata.gameProto, 99);
-  assertEquals(classifyReplaySimulationVersion(2), "unknown");
+  assertEquals(classifyReplaySimulationVersion(99), "unknown");
   assertEquals(
     classifyReplaySimulationVersion(
-      2,
+      99,
       [
-        REPLAY_SIMULATION_VERSIONS[0]!,
-        { version: 2, role: "previous" },
+        ...REPLAY_SIMULATION_VERSIONS,
+        { version: 99, role: "previous" },
       ] satisfies readonly ReplaySimulationVersionEntry[],
     ),
     "previous",

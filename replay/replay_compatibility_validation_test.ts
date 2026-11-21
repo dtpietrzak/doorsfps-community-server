@@ -114,15 +114,15 @@ Deno.test("17.5 rejection: another simulation version decodes, catalogs, and doe
   const rewritten = rewrite(bytes, (doc) => {
     const initMeta = (doc.initialState as Record<string, unknown>)
       .metadata as Record<string, unknown>;
-    (doc.metadata as Record<string, unknown>).simulationVersion = 2;
-    initMeta.simulationVersion = 2;
+    (doc.metadata as Record<string, unknown>).simulationVersion = 99;
+    initMeta.simulationVersion = 99;
   });
   const decoded = decodeReplayContainer(rewritten);
-  assertEquals(decoded.metadata.simulationVersion, 2);
+  assertEquals(decoded.metadata.simulationVersion, 99);
   assertEquals(replayCompatibilityFromContainer(decoded).mode, "unsupported");
 
   const stamp = await extractReplayCatalog(rewritten);
-  assertEquals(stamp?.simulationVersion, 2);
+  assertEquals(stamp?.simulationVersion, 99);
 
   const error = assertThrows(
     () => loadReplay(rewritten),
@@ -204,7 +204,7 @@ Deno.test("17.5 rejection: the runner refuses a foreign ruleset and accepts a lo
   let stepped = false;
   const foreign = stubSession({
     raidMatch: { active: false },
-    simulationVersion: 2,
+    simulationVersion: 99,
     replayFormatVersion: 1,
     map: { name: "encoding-map", version: 1 },
   });

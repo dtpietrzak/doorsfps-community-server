@@ -134,16 +134,16 @@ Deno.test("17.4 policy: another simulation version still decodes and is unsuppor
   const decoded = decodeReplayContainer(rewrite(bytes, (doc) => {
     const initMeta = (doc.initialState as Record<string, unknown>)
       .metadata as Record<string, unknown>;
-    (doc.metadata as Record<string, unknown>).simulationVersion = 2;
-    initMeta.simulationVersion = 2;
+    (doc.metadata as Record<string, unknown>).simulationVersion = 99;
+    initMeta.simulationVersion = 99;
   }));
-  assertEquals(decoded.metadata.simulationVersion, 2);
+  assertEquals(decoded.metadata.simulationVersion, 99);
   const verdict = replayCompatibilityFromContainer(decoded);
   assertEquals(verdict.simulation.versionClass, "unknown");
   assertEquals(verdict.mode, "unsupported");
   assertEquals(verdict.playable, false);
   assertEquals(
-    replayCompatibilityFromVersions({ format: 1, simulation: 2, map: 2 }).mode,
+    replayCompatibilityFromVersions({ format: 1, simulation: 99, map: 2 }).mode,
     "unsupported",
   );
 });

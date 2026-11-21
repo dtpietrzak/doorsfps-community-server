@@ -240,7 +240,7 @@ export const DOOR_POST_WIDTH = 0.5;
  */
 export const DOOR_CLOSED_STANDOFF = 1.0;
 /** Spawn protection against camping — invulnerable but can still shoot. */
-export const SPAWN_INVULN_MS = 1000;
+export const SPAWN_INVULN_MS = 500;
 
 /**
  * Door open phase (wall-clock ms). Match starts open; captures only while open.
