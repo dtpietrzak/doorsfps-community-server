@@ -1,4 +1,4 @@
-import { abs, max, min, refinedAtan2, round } from "../math/index.ts";
+import { abs, distance2, max, min, refinedAtan2, round } from "../math/index.ts";
 
 /**
  * Closed wall-loop detection for top-down map views (minimap, map builder).
@@ -28,6 +28,10 @@ const MIN_FACE_AREA = 1e-3;
 const ON_EDGE_EPS = 1e-6;
 /** Snap free endpoints onto bounds when this close (loaded map float noise). */
 const BOUNDS_SNAP_EPS = 1e-3;
+/** An opening may sit this far off a wall line and still cut it. */
+const GAP_CROSS_EPS = 1e-2;
+/** Ignore opening overlaps shorter than this. */
+const GAP_ALONG_EPS = 1e-3;
 
 function keyOf(x: number, z: number): string {
   return `${round(x / VERTEX_EPS)},${round(z / VERTEX_EPS)}`;
@@ -303,6 +307,93 @@ function normalizeWalls(
   });
 }
 
+function segmentLength(segs: readonly WallSegment[]): number {
+  let total = 0;
+  for (let i = 0; i < segs.length; i++) {
+    const s = segs[i]!;
+    total += distance2(s.b.x - s.a.x, s.b.z - s.a.z);
+  }
+  return total;
+}
+
+/**
+ * Remove collinear overlaps of `gaps` from `segments`. A gap that does not
+ * lie on a segment is ignored. A segment that is fully covered is dropped.
+ */
+function subtractCollinearGaps(
+  segments: readonly WallSegment[],
+  gaps: readonly WallSegment[],
+): WallSegment[] {
+  const out: WallSegment[] = [];
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i]!;
+    const dx = seg.b.x - seg.a.x;
+    const dz = seg.b.z - seg.a.z;
+    const len = distance2(dx, dz);
+    if (len < 1e-6) continue;
+    const inv = 1 / len;
+    const ux = dx * inv;
+    const uz = dz * inv;
+    const nx = -uz;
+    const nz = ux;
+    const cuts: Array<{ s0: number; s1: number }> = [];
+    for (let g = 0; g < gaps.length; g++) {
+      const gap = gaps[g]!;
+      const ax = gap.a.x - seg.a.x;
+      const az = gap.a.z - seg.a.z;
+      const bx = gap.b.x - seg.a.x;
+      const bz = gap.b.z - seg.a.z;
+      if (abs(ax * nx + az * nz) > GAP_CROSS_EPS) continue;
+      if (abs(bx * nx + bz * nz) > GAP_CROSS_EPS) continue;
+      const sA = ax * ux + az * uz;
+      const sB = bx * ux + bz * uz;
+      let s0 = sA < sB ? sA : sB;
+      let s1 = sA < sB ? sB : sA;
+      if (s1 <= GAP_ALONG_EPS || s0 >= len - GAP_ALONG_EPS) continue;
+      if (s0 < 0) s0 = 0;
+      if (s1 > len) s1 = len;
+      if (s1 - s0 < GAP_ALONG_EPS) continue;
+      cuts.push({ s0, s1 });
+    }
+    if (cuts.length === 0) {
+      out.push({
+        a: { x: seg.a.x, z: seg.a.z },
+        b: { x: seg.b.x, z: seg.b.z },
+      });
+      continue;
+    }
+    cuts.sort((p, q) => p.s0 - q.s0);
+    const merged: Array<{ s0: number; s1: number }> = [];
+    for (let c = 0; c < cuts.length; c++) {
+      const cut = cuts[c]!;
+      const last = merged[merged.length - 1];
+      if (!last || cut.s0 > last.s1 - GAP_ALONG_EPS) {
+        merged.push({ s0: cut.s0, s1: cut.s1 });
+      } else if (cut.s1 > last.s1) {
+        last.s1 = cut.s1;
+      }
+    }
+    let cursor = 0;
+    for (let c = 0; c < merged.length; c++) {
+      const cut = merged[c]!;
+      if (cut.s0 > cursor + GAP_ALONG_EPS) {
+        out.push({
+          a: { x: seg.a.x + ux * cursor, z: seg.a.z + uz * cursor },
+          b: { x: seg.a.x + ux * cut.s0, z: seg.a.z + uz * cut.s0 },
+        });
+      }
+      if (cut.s1 > cursor) cursor = cut.s1;
+    }
+    if (cursor < len - GAP_ALONG_EPS) {
+      out.push({
+        a: { x: seg.a.x + ux * cursor, z: seg.a.z + uz * cursor },
+        b: { x: seg.b.x, z: seg.b.z },
+      });
+    }
+  }
+  return out;
+}
+
 /**
  * Find interior faces of the wall segment graph (closed geometric loops).
  * Uses a planar embedding walk: at each vertex, take the next clockwise edge.
@@ -310,16 +401,37 @@ function normalizeWalls(
  *
  * When `bounds` is provided, outer walls are part of the graph so alcoves and
  * rooms that close against the perimeter count. The largest positive face
- * (main walkable arena) is discarded so only solid pockets remain.
+ * (main walkable arena) is discarded so only solid pockets remain. If `gaps`
+ * open that perimeter (an energy door, or an opening on the outer edge), the
+ * arena is not a face and every remaining closure is kept.
+ *
+ * `gaps` are openings removed from any collinear wall or perimeter edge
+ * before the walk. A loop that crosses one is not a closure. A gap that does
+ * not lie on a segment is ignored.
  */
 export function findClosedWallPolygons(
   walls: WallSegment[],
   bounds?: WallPolyBounds | null,
+  gaps?: readonly WallSegment[] | null,
 ): WallPolyPoint[][] {
   const normalized = normalizeWalls(walls, bounds);
-  const seed: WallSegment[] = [...normalized];
+  const opening = gaps && gaps.length > 0 ? gaps : null;
+  const interior = opening
+    ? subtractCollinearGaps(normalized, opening)
+    : normalized;
+  const seed: WallSegment[] = [...interior];
+  let perimeterOpen = false;
   if (bounds) {
-    seed.push(...exteriorSegments(normalized, bounds));
+    const exterior = exteriorSegments(normalized, bounds);
+    if (opening) {
+      const cut = subtractCollinearGaps(exterior, opening);
+      if (segmentLength(exterior) - segmentLength(cut) > GAP_ALONG_EPS) {
+        perimeterOpen = true;
+      }
+      seed.push(...cut);
+    } else {
+      seed.push(...exterior);
+    }
   }
 
   const planar = splitSegmentsAtJoints(seed);
@@ -444,9 +556,11 @@ export function findClosedWallPolygons(
     walkFace(edge.b, edge.a);
   }
 
-  // With outer bounds, every open pocket is a face — drop the main arena
-  // (largest area) so only solid closures remain.
-  if (bounds && faces.length > 0) {
+  // With a sealed outer bounds, every open pocket is a face — drop the main
+  // arena (largest area) so only solid closures remain. An opening in the
+  // perimeter means the arena is not a face; do not drop a real room that
+  // happens to be the largest one left.
+  if (bounds && !perimeterOpen && faces.length > 0) {
     let maxArea = -1;
     let maxIdx = 0;
     for (let i = 0; i < faces.length; i++) {

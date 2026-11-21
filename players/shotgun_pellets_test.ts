@@ -132,8 +132,8 @@ function expectedDamage(
   return Math.round(sum);
 }
 
-Deno.test("shotgun def: 8 pellets, third in the loadout order", () => {
-  assertEquals(SHOTGUN.pellets, 8);
+Deno.test("shotgun def: 7 pellets, third in the loadout order", () => {
+  assertEquals(SHOTGUN.pellets, 7);
   assertEquals(isWeaponId(WEAPON_SHOTGUN), true);
   assertEquals([...WEAPON_ORDER], [WEAPON_PISTOL, WEAPON_RIFLE, WEAPON_SHOTGUN]);
 });
@@ -164,7 +164,7 @@ Deno.test("point blank: every pellet on one victim, one summed outcome", () => {
   const outcome = shoot();
   assertExists(outcome?.damages);
   const pellets = outcome.shot.pellets!;
-  assertEquals(pellets.length, 8);
+  assertEquals(pellets.length, 7);
   assert(pellets.every((p) => p.hitId === "v"));
   // Centre pellet mirrors the top-level fields.
   assertEquals(pellets[0]!.direction, outcome.shot.direction);

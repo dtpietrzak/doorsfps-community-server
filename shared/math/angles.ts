@@ -2,6 +2,9 @@ import { HALF_PI, PI, TWO_PI } from "./constants.ts";
 
 export type SinCos = Readonly<{ sin: number; cos: number }>;
 
+/** Mutable pair written by {@link fastSinCosInto}. */
+export type SinCosOut = { sin: number; cos: number };
+
 /**
  * Wrap a gameplay angle into [-PI, PI]. Bot angles are expected to be within a
  * few turns; repeated subtraction avoids the dynamic Math surface entirely.
@@ -23,21 +26,12 @@ export function angleDelta(target: number, current: number): number {
  * Range reduction keeps the polynomial on [-PI/2, PI/2]. The approximation
  * budget is intentionally visual/gameplay oriented: <0.001 absolute error is
  * substantially below movement, collision, and network quantization effects.
+ *
+ * `fastSin` and `fastCos` each run only their own series and allocate nothing.
+ * Their range reduction matches `fastSinCosInto`.
  */
-export function fastSinCos(angle: number): SinCos {
-  let x = wrapRadians(angle);
-  let cosSign = 1;
-
-  if (x > HALF_PI) {
-    x = PI - x;
-    cosSign = -1;
-  } else if (x < -HALF_PI) {
-    x = -PI - x;
-    cosSign = -1;
-  }
-
-  const x2 = x * x;
-  const sin = x * (
+function sinSeries(x: number, x2: number): number {
+  return x * (
     1 + x2 * (
         -0.16666666666666666 + x2 * (
             0.008333333333333333 + x2 * (
@@ -48,7 +42,10 @@ export function fastSinCos(angle: number): SinCos {
           )
       )
   );
-  const cos = cosSign * (
+}
+
+function cosSeries(x2: number, cosSign: number): number {
+  return cosSign * (
     1 + x2 * (
         -0.5 + x2 * (
             0.041666666666666664 + x2 * (
@@ -62,16 +59,50 @@ export function fastSinCos(angle: number): SinCos {
           )
       )
   );
+}
 
-  return { sin, cos };
+export function fastSinCosInto(angle: number, out: SinCosOut): void {
+  let x = wrapRadians(angle);
+  let cosSign = 1;
+
+  if (x > HALF_PI) {
+    x = PI - x;
+    cosSign = -1;
+  } else if (x < -HALF_PI) {
+    x = -PI - x;
+    cosSign = -1;
+  }
+
+  const x2 = x * x;
+  out.sin = sinSeries(x, x2);
+  out.cos = cosSeries(x2, cosSign);
+}
+
+export function fastSinCos(angle: number): SinCos {
+  const out: SinCosOut = { sin: 0, cos: 0 };
+  fastSinCosInto(angle, out);
+  return out;
 }
 
 export function fastSin(angle: number): number {
-  return fastSinCos(angle).sin;
+  let x = wrapRadians(angle);
+  if (x > HALF_PI) x = PI - x;
+  else if (x < -HALF_PI) x = -PI - x;
+  const x2 = x * x;
+  return sinSeries(x, x2);
 }
 
 export function fastCos(angle: number): number {
-  return fastSinCos(angle).cos;
+  let x = wrapRadians(angle);
+  let cosSign = 1;
+  if (x > HALF_PI) {
+    x = PI - x;
+    cosSign = -1;
+  } else if (x < -HALF_PI) {
+    x = -PI - x;
+    cosSign = -1;
+  }
+  return cosSeries(x * x, cosSign);
 }
 
 /**
@@ -109,8 +140,9 @@ export function fastAtan2(y: number, x: number): number {
 export function refinedAtan2(y: number, x: number): number {
   if (x === 0 || y === 0) return fastAtan2(y, x);
   let angle = fastAtan2(y, x);
+  const pair: SinCosOut = { sin: 0, cos: 0 };
   for (let i = 0; i < 2; i++) {
-    const pair = fastSinCos(angle);
+    fastSinCosInto(angle, pair);
     const cross = y * pair.cos - x * pair.sin;
     const dot = x * pair.cos + y * pair.sin;
     if (dot > -0.000000000001 && dot < 0.000000000001) break;
@@ -126,7 +158,8 @@ export function yawFromWorldDirection(dx: number, dz: number): number {
 
 /** Suitable for FOV/config angles comfortably away from +/-PI/2. */
 export function fastTan(angle: number): number {
-  const pair = fastSinCos(angle);
+  const pair: SinCosOut = { sin: 0, cos: 0 };
+  fastSinCosInto(angle, pair);
   const cosAbs = pair.cos < 0 ? -pair.cos : pair.cos;
   if (cosAbs < 0.000001) return pair.sin < 0 ? -1_000_000 : 1_000_000;
   return pair.sin / pair.cos;

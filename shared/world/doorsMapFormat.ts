@@ -10,7 +10,9 @@
  *
  * Version history:
  *   1 — original schema (`mirrorMode` omitted / optional)
- *   2 — required `mirrorMode` (`flipY` | `flipXZ`)
+ *   2 — required `mirrorMode` (`flipY` | `flipXZ`). Later optional fields
+ *       (`none` / `zombots`, `windows`, `doors`, `spawnCorner`) stay on v2
+ *       and are omitted when empty, so shipped maps are not rewritten.
  *
  * A replay records this number as `map.version` (epic 17.3). The replay
  * keeps the version the match used.

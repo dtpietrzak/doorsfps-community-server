@@ -677,7 +677,7 @@ export function rollStandGroundStrafeDepth(
   if (u < TARGET_STRAFE_DEPTH_NONE_P) {
     return { depth: undefined, duty: 0 };
   }
-  const half = (1 - TARGET_STRAFE_DEPTH_NONE_P) / 2;
+  const half = (1 - TARGET_STRAFE_DEPTH_NONE_P) * 0.5;
   const depth: TargetEnemyStrafeDepth = u < TARGET_STRAFE_DEPTH_NONE_P + half
     ? "forward"
     : "backward";

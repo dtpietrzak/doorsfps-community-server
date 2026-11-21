@@ -348,6 +348,116 @@ Deno.test("Welcome + map is smaller than JSON", () => {
   assertEquals(rback.raid.goal, 5);
 });
 
+Deno.test("welcome windows roundtrip and an empty list does not grow the map", () => {
+  const spawn = {
+    ...motionPlayer("me", 0),
+    name: "Ada",
+    score: 2,
+    kills: 1,
+    deaths: 0,
+    xp: 1200,
+    mmsRankId: "steel",
+    head: 1,
+    visor: 0,
+    shoulder: 0,
+    body: 0,
+    leg: 0,
+    hue: 0.1,
+    gunHue: -0.2,
+    pistol: 1,
+    rifle: 0,
+    crosshair: 2,
+  };
+  const welcome = {
+    id: "me",
+    serverName: "Local",
+    tickRate: 60,
+    snapshotRate: 20,
+    tick: 40,
+    doorsOpen: true,
+    doorChangeTick: 90,
+    matchEndTick: 36000,
+    spawn,
+    players: [spawn],
+    team: "A",
+    map: miniMap,
+    scores: { A: 0, B: 0 },
+    ranked: false,
+    autofillBots: 8,
+    ownedAbilities: ["quick", "bullets2"],
+    skillLoadout: ["quick", "glitch", null, null],
+  };
+  const empty = {
+    ...welcome,
+    map: { ...miniMap, windows: [] as const },
+  };
+  const plainBytes = encodeGamePacket("welcome", welcome)!;
+  const emptyBytes = encodeGamePacket("welcome", empty)!;
+  assertEquals(emptyBytes, plainBytes);
+  const plainBack = roundtrip("welcome", welcome) as {
+    map: { windows?: unknown };
+  };
+  assertEquals(plainBack.map.windows, undefined);
+
+  const win = { id: "win", wallId: "w1", center: { x: 0, z: -2 } };
+  const opened = {
+    ...welcome,
+    map: { ...miniMap, windows: [win] },
+  };
+  const openedBytes = encodeGamePacket("welcome", opened)!;
+  assert(openedBytes.byteLength > plainBytes.byteLength);
+  const back = roundtrip("welcome", opened) as typeof opened;
+  assertEquals(back.map.windows, [win]);
+  assertEquals(back.map.walls.length, 2);
+  assertEquals(back.map.botHints, miniMap.botHints);
+
+  const door = { id: "d", wallId: "w1", center: { x: 1, z: -2 } };
+  const withDoor = { ...welcome, map: { ...miniMap, doors: [door] } };
+  const withDefaultCost = {
+    ...welcome,
+    map: { ...miniMap, doors: [{ ...door, cost: 500 }] },
+  };
+  assertEquals(encodeGamePacket("welcome", withDoor), encodeGamePacket("welcome", withDefaultCost));
+  const doorBack = roundtrip("welcome", withDoor) as {
+    map: { doors?: unknown; windows?: unknown };
+  };
+  assertEquals(doorBack.map.doors, [door]);
+  assertEquals(doorBack.map.windows, undefined);
+  const priced = { ...door, cost: 250 };
+  const pricedBack = roundtrip("welcome", {
+    ...welcome,
+    map: { ...miniMap, doors: [priced] },
+  }) as { map: { doors?: unknown } };
+  assertEquals(pricedBack.map.doors, [priced]);
+  const emptyDoors = { ...welcome, map: { ...miniMap, doors: [] as const } };
+  assertEquals(encodeGamePacket("welcome", emptyDoors), plainBytes);
+  const flip = {
+    ...welcome,
+    map: { ...miniMap, mirrorMode: "flipY" as const },
+  };
+  assertEquals(encodeGamePacket("welcome", flip), plainBytes);
+  const flipBack = roundtrip("welcome", flip) as { map: { mirrorMode?: string } };
+  assertEquals(flipBack.map.mirrorMode, undefined);
+
+  const zombots = {
+    ...welcome,
+    map: { ...miniMap, mirrorMode: "zombots" as const, spawnCorner: 1 as const },
+  };
+  const zombotsBytes = encodeGamePacket("welcome", zombots)!;
+  assert(zombotsBytes.byteLength > plainBytes.byteLength);
+  const zombotsBack = roundtrip("welcome", zombots) as {
+    map: { mirrorMode?: string; spawnCorner?: number; doors?: unknown };
+  };
+  assertEquals(zombotsBack.map.mirrorMode, "zombots");
+  assertEquals(zombotsBack.map.spawnCorner, 1);
+  assertEquals(zombotsBack.map.doors, undefined);
+  const zombotsDefault = roundtrip("welcome", {
+    ...welcome,
+    map: { ...miniMap, mirrorMode: "zombots" as const },
+  }) as { map: { spawnCorner?: number } };
+  assertEquals(zombotsDefault.map.spawnCorner, 0);
+});
+
 Deno.test("full-cosmetics snapshot roundtrips every style slot", () => {
   const player = {
     ...motionPlayer("style", 3),

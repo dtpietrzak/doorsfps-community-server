@@ -1,11 +1,13 @@
 import {
-  fastCos,
-  fastSin,
+  fastSinCosInto,
   HALF_PI,
   max,
   min,
   RAD_PER_DEG,
 } from "../math/index.ts";
+
+/** Reused by fastSinCosInto. Copy sin and cos out before the next call. */
+const SIN_COS = { sin: 0, cos: 0 };
 import { PLAYER_AUTHORED_CROUCH_HEAD_CENTER_Y } from "./playerModelDimensions.ts";
 
 /**
@@ -83,11 +85,17 @@ export function headHitOffsetFromFeet(opts: {
   const stanceScale = restY / STAND_HEAD_CENTER_Y;
   const { body } = splitLookAimPitch(pitch);
   const lever = STAND_HEAD_CENTER_Y - SPINE_PIVOT_Y;
-  const localY = stanceScale * (SPINE_PIVOT_Y + lever * fastCos(body));
-  const localBack = lever * fastSin(body);
+  fastSinCosInto(body, SIN_COS);
+  const bodySin = SIN_COS.sin;
+  const bodyCos = SIN_COS.cos;
+  fastSinCosInto(yaw, SIN_COS);
+  const yawSin = SIN_COS.sin;
+  const yawCos = SIN_COS.cos;
+  const localY = stanceScale * (SPINE_PIVOT_Y + lever * bodyCos);
+  const localBack = lever * bodySin;
   return {
-    x: localBack * fastSin(yaw),
+    x: localBack * yawSin,
     y: localY,
-    z: localBack * fastCos(yaw),
+    z: localBack * yawCos,
   };
 }

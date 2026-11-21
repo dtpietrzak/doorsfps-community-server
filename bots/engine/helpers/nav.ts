@@ -15,9 +15,11 @@ import {
   approximateDistance2,
   distance2,
   distance3,
+  distanceSquared2,
   max,
   min,
   PI,
+  QUARTER_PI,
 } from "../math/index.ts";
 import {
   estimateHalfWallFaceYaw,
@@ -99,9 +101,10 @@ export function agentDoorSpawn(
   const dx = center.x - mid.x;
   const dz = center.z - mid.z;
   const len = distance2(dx, dz) || 1;
+  const inv = 1 / len;
   const inset = DOOR_NAV_INSET + 0.55 + AGENT_DOOR_SPAWN_OUTSET;
-  const x = mid.x + (dx / len) * inset;
-  const z = mid.z + (dz / len) * inset;
+  const x = mid.x + dx * inv * inset;
+  const z = mid.z + dz * inv * inset;
   return {
     x,
     z,
@@ -112,8 +115,8 @@ export function agentDoorSpawn(
 function doorMidpoint(map: DoorsMap, side: TeamSide): Vec2 {
   const [d0, d1] = doorSegment(map.bounds, side);
   return {
-    x: (d0.x + d1.x) / 2,
-    z: (d0.z + d1.z) / 2,
+    x: (d0.x + d1.x) * 0.5,
+    z: (d0.z + d1.z) * 0.5,
   };
 }
 
@@ -124,9 +127,10 @@ function doorNavPoint(map: DoorsMap, side: TeamSide): Vec2 {
   const dx = center.x - mid.x;
   const dz = center.z - mid.z;
   const len = distance2(dx, dz) || 1;
+  const inv = 1 / len;
   return {
-    x: mid.x + (dx / len) * DOOR_NAV_INSET,
-    z: mid.z + (dz / len) * DOOR_NAV_INSET,
+    x: mid.x + dx * inv * DOOR_NAV_INSET,
+    z: mid.z + dz * inv * DOOR_NAV_INSET,
   };
 }
 
@@ -153,8 +157,8 @@ export function isInEnemyDoorZone(
 export function mapCenter(map: DoorsMap): Vec2 {
   const { minX, maxX, minZ, maxZ } = map.bounds;
   return {
-    x: (minX + maxX) / 2,
-    z: (minZ + maxZ) / 2,
+    x: (minX + maxX) * 0.5,
+    z: (minZ + maxZ) * 0.5,
   };
 }
 
@@ -171,9 +175,10 @@ export function doorCampAnchor(
   const dx = center.x - door.x;
   const dz = center.z - door.z;
   const len = distance2(dx, dz) || 1;
+  const inv = 1 / len;
   return {
-    x: door.x + (dx / len) * inset,
-    z: door.z + (dz / len) * inset,
+    x: door.x + dx * inv * inset,
+    z: door.z + dz * inv * inset,
   };
 }
 
@@ -388,8 +393,9 @@ export function pickCoverDoorCamp(
   const ix = center.x - door.x;
   const iz = center.z - door.z;
   const ilen = distance2(ix, iz) || 1;
-  const inX = ix / ilen;
-  const inZ = iz / ilen;
+  const iInv = 1 / ilen;
+  const inX = ix * iInv;
+  const inZ = iz * iInv;
   // Lateral axis (perpendicular to door→center).
   const latX = -inZ;
   const latZ = inX;
@@ -663,6 +669,8 @@ function fallbackDoorCamp(
   const { latX, latZ } = axes;
   const candidates: CampSample[] = [];
   const rng = opts.rng;
+  const doorReach = opts.minDist * 0.85;
+  const doorReachSq = doorReach * doorReach;
 
   for (let i = 0; i < 16; i++) {
     const inset = opts.preferTight ? 3.2 + rng() * 1.4 : 4.5 + rng() * 2.2;
@@ -677,7 +685,8 @@ function fallbackDoorCamp(
     const resolved = collision.resolvePosition(raw.x, raw.z);
     if (collision.classifyProbe(resolved.x, resolved.z) !== "clear") continue;
     if (
-      distance2(resolved.x - door.x, resolved.z - door.z) < opts.minDist * 0.85
+      doorReach > 0 &&
+      distanceSquared2(resolved.x - door.x, resolved.z - door.z) < doorReachSq
     ) {
       continue;
     }
@@ -742,14 +751,14 @@ export function smartDetourYawOffset(
   // Keep peels in the forward-ish hemisphere. ±2π/3 (~120°) was walking bots
   // south away from the door after wall-escape detours.
   const candidates = [
-    PI / 4,
-    -PI / 4,
-    PI / 2.2,
-    -PI / 2.2,
-    PI / 3,
-    -PI / 3,
-    PI / 2.6,
-    -PI / 2.6,
+    QUARTER_PI,
+    -QUARTER_PI,
+    PI * 0.45454545454545453,
+    -PI * 0.45454545454545453,
+    PI * 0.3333333333333333,
+    -PI * 0.3333333333333333,
+    PI * 0.3846153846153846,
+    -PI * 0.3846153846153846,
   ];
 
   let bestOffset = 0;
@@ -781,6 +790,6 @@ export function smartDetourYawOffset(
   const u2 = rng();
   const sign = (Number.isFinite(u) ? u : 0.5) < 0.5 ? -1 : 1;
   const t = Number.isFinite(u2) ? u2 : 0.5;
-  const mag = PI / 4 + t * (PI / 5);
+  const mag = QUARTER_PI + t * (PI * 0.2);
   return sign * mag;
 }

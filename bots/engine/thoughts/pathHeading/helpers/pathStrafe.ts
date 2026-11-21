@@ -434,8 +434,9 @@ export function moveYawFromApproachLateral(
   let mz = fz * fwdW + rz * latW;
   const mLen = distance2(mx, mz);
   if (!(mLen > 1e-8)) return approachYaw;
-  mx /= mLen;
-  mz /= mLen;
+  const inv = 1 / mLen;
+  mx *= inv;
+  mz *= inv;
   return yawFromWorldDirection(mx, mz);
 }
 

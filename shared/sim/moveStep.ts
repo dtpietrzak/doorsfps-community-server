@@ -22,7 +22,14 @@ import {
   sprintDrainPerSecond,
   sprintRegenPerSecond,
 } from "./game.ts";
-import { distance2, fastCos, fastSin, floor, max, min } from "../math/index.ts";
+import {
+  distance2,
+  distanceSquared2,
+  fastSinCosInto,
+  floor,
+  max,
+  min,
+} from "../math/index.ts";
 import {
   PLAYER_CROUCH_VISOR_CENTER_Y,
   PLAYER_VISOR_CENTER_Y,
@@ -221,6 +228,12 @@ const BLINK_STEP = 0.15;
  * as blocked (matches MapCollision probeReachable eps).
  */
 const BLINK_REACH_EPS = 0.08;
+const BLINK_DIR_EPS_SQ = 1e-8 * 1e-8;
+const BLINK_REACH_EPS_SQ = BLINK_REACH_EPS * BLINK_REACH_EPS;
+const BLINK_STUCK_EPS_SQ = 1e-5 * 1e-5;
+
+/** Reused by fastSinCosInto. Copy sin and cos out before the next call. */
+const SIN_COS = { sin: 0, cos: 0 };
 
 /**
  * Skill F — Teleport: horizontal blink along look yaw (forward = −sin/−cos).
@@ -245,10 +258,11 @@ export function blinkAlongYaw(
     return { x, z };
   }
 
-  const dirX = -fastSin(yaw);
-  const dirZ = -fastCos(yaw);
+  fastSinCosInto(yaw, SIN_COS);
+  const dirX = -SIN_COS.sin;
+  const dirZ = -SIN_COS.cos;
   // Zero-length direction (shouldn't happen with finite yaw).
-  if (distance2(dirX, dirZ) < 1e-8) return { x, z };
+  if (distanceSquared2(dirX, dirZ) < BLINK_DIR_EPS_SQ) return { x, z };
 
   let cx = x;
   let cz = z;
@@ -260,11 +274,11 @@ export function blinkAlongYaw(
     const wantZ = cz + dirZ * step;
     const got = collision.resolvePosition(wantX, wantZ, radius, feetY, headY);
     // Blocked or slid off the intended sample — stop at last free point.
-    if (distance2(got.x - wantX, got.z - wantZ) > BLINK_REACH_EPS) {
+    if (distanceSquared2(got.x - wantX, got.z - wantZ) > BLINK_REACH_EPS_SQ) {
       break;
     }
     // No progress (flush against solid).
-    if (distance2(got.x - cx, got.z - cz) < 1e-5) {
+    if (distanceSquared2(got.x - cx, got.z - cz) < BLINK_STUCK_EPS_SQ) {
       break;
     }
     cx = got.x;
@@ -332,8 +346,9 @@ function tryStartMoveBurst(
   opts: { forceCrouch: boolean; stallStaminaSpend: boolean },
 ): boolean {
   if (!canStartMoveBurst(s, input)) return false;
-  const sin = fastSin(input.yaw);
-  const cos = fastCos(input.yaw);
+  fastSinCosInto(input.yaw, SIN_COS);
+  const sin = SIN_COS.sin;
+  const cos = SIN_COS.cos;
   // Same WASD basis as normal move; no back contribution (gated above).
   let mx = 0;
   let mz = 0;
@@ -351,9 +366,10 @@ function tryStartMoveBurst(
   }
   const len = distance2(mx, mz);
   if (len <= 1e-6) return false;
+  const inv = 1 / len;
   const cost = slideStaminaCostSeconds();
-  s.slideDirX = mx / len;
-  s.slideDirZ = mz / len;
+  s.slideDirX = mx * inv;
+  s.slideDirZ = mz * inv;
   s.slideRemaining = opts.forceCrouch
     ? SLIDE_DURATION_S
     : MELEE_LUNGE_DURATION_S;
@@ -451,8 +467,9 @@ export function stepMove(
       s.crouch = nextCrouch;
     }
 
-    const sin = fastSin(input.yaw);
-    const cos = fastCos(input.yaw);
+    fastSinCosInto(input.yaw, SIN_COS);
+    const sin = SIN_COS.sin;
+    const cos = SIN_COS.cos;
     let mx = 0;
     let mz = 0;
 

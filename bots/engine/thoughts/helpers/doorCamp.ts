@@ -229,14 +229,15 @@ export function pickEnemyDoorCampPlant(
   const side = enemyDoorSide(map, team);
   const base = enemyDoorTarget(map, team);
   const [d0, d1] = doorSegment(map.bounds, side);
-  const midX = (d0.x + d1.x) / 2;
-  const midZ = (d0.z + d1.z) / 2;
+  const midX = (d0.x + d1.x) * 0.5;
+  const midZ = (d0.z + d1.z) * 0.5;
   const alongX = d1.x - d0.x;
   const alongZ = d1.z - d0.z;
   const alongLen = distance2(alongX, alongZ) || 1;
-  const ux = alongX / alongLen;
-  const uz = alongZ / alongLen;
-  const halfW = min(side.doorHalfWidth, alongLen / 2) -
+  const alongInv = 1 / alongLen;
+  const ux = alongX * alongInv;
+  const uz = alongZ * alongInv;
+  const halfW = min(side.doorHalfWidth, alongLen * 0.5) -
     DOOR_CAMP_LATERAL_PAD;
   const maxAlong = max(0.4, halfW);
 

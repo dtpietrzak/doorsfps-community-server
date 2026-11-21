@@ -12,7 +12,7 @@
 import type { DoorsMap } from "../../../shared/map.ts";
 import type { TeamId } from "../../../shared/network.ts";
 import { YAW_PLAYER_FOV_HALF_ANGLE } from "../../../../../shared/world/wallCorners.ts";
-import { distance2, min } from "../../../math/index.ts";
+import { distanceSquared2, min } from "../../../math/index.ts";
 import {
   enemyDoorMidpoint,
   yawInHalfAngle,
@@ -79,12 +79,12 @@ export function pickDoorCenterBlineTarget(
   const enemy = enemyDoorMidpoint(map, team);
   if (!enemy) return null;
 
-  const d = distance2(enemy.x - x, enemy.z - z);
-  if (!(d <= maxDist) || !(d > 1e-6)) return null;
+  const dSq = distanceSquared2(enemy.x - x, enemy.z - z);
+  if (!(dSq <= maxDist * maxDist) || !(dSq > 1e-6 * 1e-6)) return null;
   const bearing = yawTowardPoint(x, z, enemy.x, enemy.z);
   if (bearing === null) return null;
   const commitDist = min(DOOR_CENTER_BLINE_COMMIT_DIST, maxDist);
-  if (d <= commitDist) return enemy;
+  if (dSq <= commitDist * commitDist) return enemy;
   if (!yawInHalfAngle(faceYaw, bearing, half)) return null;
   return enemy;
 }

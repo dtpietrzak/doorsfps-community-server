@@ -34,6 +34,7 @@
 import {
   computeDoorYawDots,
   doorLineSegment,
+  mapClosureGaps,
   resolveWallCorners,
   type DoorYawDotSide,
   type WallCornerBounds,
@@ -49,15 +50,20 @@ import {
   abs,
   clamp01,
   distance2,
+  distanceSquared2,
   fastAtan2,
-  fastCos,
-  fastSin,
+  fastSinCosInto,
   max,
   min,
   PI,
   round,
   TWO_PI,
+  HALF_PI,
 } from "../math/index.ts";
+
+/** Reused by fastSinCosInto. Copy sin and cos out before the next call. */
+const SIN_COS = { sin: 0, cos: 0 };
+const YAW_DIR_EPS_SQ = 1e-6 * 1e-6;
 
 function fallbackRandom(): number {
   return 0.5;
@@ -124,7 +130,7 @@ export const HUNT_YAW_POLE_NOISE_MAX = 15;
 /** Jacked doorDist max while hunting (patrol to bias door). */
 export const HUNT_DOOR_DIST_MAX = 18;
 /** Wider door/goal FOV half-angle while hunting (agent search cone). */
-export const HUNT_DOOR_FOV_HALF_ANGLE = PI / 2;
+export const HUNT_DOOR_FOV_HALF_ANGLE = HALF_PI;
 /** Hunt doorFov binary score (stronger agent-bearing pull). */
 export const HUNT_YAW_POLE_DOOR_FOV_SCORE = 20;
 /** Hunt map-center soft bias (low so agent/doorDist dominate). */
@@ -220,7 +226,12 @@ export type YawPoleMap = {
    * Full walls — used by {@link resolveWallCorners} when `wallCorners` is
    * missing/empty so client debug and bots stay in sync on legacy maps.
    */
-  walls?: readonly WallCornerSegment[] | null;
+  walls?: readonly (WallCornerSegment & { id?: string })[] | null;
+  /** Used only when corners are recomputed, so a windowed room is not solid. */
+  windows?: readonly { wallId: string; center: WallCornerPoint }[] | null;
+  doors?: readonly { wallId: string; center: WallCornerPoint }[] | null;
+  /** Zombots seals the energy-door spans. Other modes leave them open. */
+  mirrorMode?: string | null;
 };
 
 export type YawPoleScoreBreakdown = {
@@ -413,10 +424,26 @@ export function splitYawPoles(map: YawPoleMap): {
 
   // Prefer author-stored corners; recompute from walls when empty (legacy).
   // Do not pass doors here — orange poles are tracked separately.
+  // Gaps are only needed for that recompute. Stored corners skip the walk,
+  // and this runs inside a think.
+  const stored = map.wallCorners;
+  const recompute = stored == null || stored.length === 0;
   const corners = resolveWallCorners(
     map.walls ?? [],
-    map.wallCorners,
+    stored,
     map.bounds,
+    undefined,
+    recompute
+      ? mapClosureGaps({
+          walls: map.walls ?? [],
+          windows: map.windows,
+          doors: map.doors,
+          bounds: map.bounds,
+          mirrorMode: map.mirrorMode,
+          teamA: map.teamA,
+          teamB: map.teamB,
+        })
+      : undefined,
   );
 
   const wallPoles: YawPolePoint[] = [];
@@ -455,7 +482,7 @@ export function yawTowardPoint(
 ): number | null {
   const dx = tx - x;
   const dz = tz - z;
-  if (!(distance2(dx, dz) > 1e-6)) return null;
+  if (!(distanceSquared2(dx, dz) > YAW_DIR_EPS_SQ)) return null;
   return fastAtan2(-dx, -dz);
 }
 
@@ -582,8 +609,9 @@ export function wishMoveYaw(
     right?: boolean;
   },
 ): number | null {
-  const sin = fastSin(lookYaw);
-  const cos = fastCos(lookYaw);
+  fastSinCosInto(lookYaw, SIN_COS);
+  const sin = SIN_COS.sin;
+  const cos = SIN_COS.cos;
   let mx = 0;
   let mz = 0;
   if (keys.forward) {
@@ -602,7 +630,7 @@ export function wishMoveYaw(
     mx += cos;
     mz -= sin;
   }
-  if (!(distance2(mx, mz) > 1e-6)) return null;
+  if (!(distanceSquared2(mx, mz) > YAW_DIR_EPS_SQ)) return null;
   return fastAtan2(-mx, -mz);
 }
 
@@ -611,7 +639,7 @@ export function wishMoveYaw(
  * Same convention as player forward. Null when length is tiny.
  */
 export function yawFromWorldDir(dx: number, dz: number): number | null {
-  if (!(distance2(dx, dz) > 1e-6)) return null;
+  if (!(distanceSquared2(dx, dz) > YAW_DIR_EPS_SQ)) return null;
   return fastAtan2(-dx, -dz);
 }
 
@@ -625,7 +653,7 @@ export function enemyDoorMidpoint(
   const side = team === "A" ? map.teamB : map.teamA;
   if (!side) return null;
   const [d0, d1] = doorLineSegment(map.bounds, side);
-  return { x: (d0.x + d1.x) / 2, z: (d0.z + d1.z) / 2 };
+  return { x: (d0.x + d1.x) * 0.5, z: (d0.z + d1.z) * 0.5 };
 }
 
 /**
@@ -672,7 +700,7 @@ export function ownDoorMidpoint(
   const side = team === "A" ? map.teamA : map.teamB;
   if (!side) return null;
   const [d0, d1] = doorLineSegment(map.bounds, side);
-  return { x: (d0.x + d1.x) / 2, z: (d0.z + d1.z) / 2 };
+  return { x: (d0.x + d1.x) * 0.5, z: (d0.z + d1.z) * 0.5 };
 }
 
 /**
@@ -681,8 +709,8 @@ export function ownDoorMidpoint(
 export function yawPoleMapCenter(map: YawPoleMap): YawPolePoint {
   const { minX, maxX, minZ, maxZ } = map.bounds;
   return {
-    x: (minX + maxX) / 2,
-    z: (minZ + maxZ) / 2,
+    x: (minX + maxX) * 0.5,
+    z: (minZ + maxZ) * 0.5,
   };
 }
 
@@ -716,8 +744,8 @@ export function yawPoleMapCenterScore(
   const lo = axis === "x" ? minX : minZ;
   const hi = axis === "x" ? maxX : maxZ;
   const lat = axis === "x" ? pole.x : pole.z;
-  const mid = (lo + hi) / 2;
-  const halfSpan = (hi - lo) / 2;
+  const mid = (lo + hi) * 0.5;
+  const halfSpan = (hi - lo) * 0.5;
   if (!(halfSpan > 1e-9)) return maxScore;
   const t = min(1, abs(lat - mid) / halfSpan);
   return maxScore * (1 - t);
@@ -1121,7 +1149,7 @@ export const YAW_POLE_CORNER_LOOK_BLEND = 1;
  * |turn angle| (radians) that maps to max strafe scale.
  * π/2 ⇒ a 90° corner gets full lateral bias (scaled by max strafe).
  */
-export const YAW_POLE_CORNER_STRAFE_REF_ANGLE = PI / 2;
+export const YAW_POLE_CORNER_STRAFE_REF_ANGLE = HALF_PI;
 /**
  * Max lateral mix into world move at a hard corner + full approach for a
  * "full normal" race-line (personality `cornerRound` = 1).
@@ -1235,7 +1263,7 @@ export function computeYawPoleCornerRound(args: {
 
   const dxExit = next.x - current.x;
   const dzExit = next.z - current.z;
-  if (!(distance2(dxExit, dzExit) > 1e-6)) return null;
+  if (!(distanceSquared2(dxExit, dzExit) > YAW_DIR_EPS_SQ)) return null;
 
   const toCurrent = yawPoleToward(args.x, args.z, current.x, current.z);
   const toNext = yawPoleToward(current.x, current.z, next.x, next.z);
@@ -1262,8 +1290,11 @@ export function computeYawPoleCornerRound(args: {
 
   // Which side is next relative to approach forward? +1 = right, −1 = left.
   // Right basis: (cos yaw, −sin yaw) when forward is (−sin, −cos).
-  const rx = fastCos(toCurrent);
-  const rz = -fastSin(toCurrent);
+  fastSinCosInto(toCurrent, SIN_COS);
+  const sin = SIN_COS.sin;
+  const cos = SIN_COS.cos;
+  const rx = cos;
+  const rz = -sin;
   // Exit direction in world (unnormalized ok for side).
   const side = dxExit * rx + dzExit * rz;
   // Strafe opposite next: next right → strafe left (−1).
@@ -1287,8 +1318,8 @@ export function computeYawPoleCornerRound(args: {
   const strafeAmount = approachT * angleScale * maxStrafe;
 
   // Blend approach forward with lateral in approach frame.
-  const fx = -fastSin(toCurrent);
-  const fz = -fastCos(toCurrent);
+  const fx = -sin;
+  const fz = -cos;
   const fwdW = 1 - strafeAmount;
   const latW = strafeAmount * strafeSign;
   let mx = fx * fwdW + rx * latW;
@@ -1298,8 +1329,9 @@ export function computeYawPoleCornerRound(args: {
     mx = fx;
     mz = fz;
   } else {
-    mx /= mLen;
-    mz /= mLen;
+    const inv = 1 / mLen;
+    mx *= inv;
+    mz *= inv;
   }
   const moveYaw = fastAtan2(-mx, -mz);
 

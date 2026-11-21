@@ -1,6 +1,6 @@
 import type { DoorsMap } from "./map.ts";
 import { isSupportedMapFormatVersion } from "../shared/world/doorsMapFormat.ts";
-import { resolveWallCorners } from "../shared/world/wallCorners.ts";
+import { mapClosureGaps, resolveWallCorners } from "../shared/world/wallCorners.ts";
 import { MapCollision } from "./MapCollision.ts";
 import defaultMapJson from "../maps/competitive/Crossroads.doors.json" with {
   type: "json",
@@ -16,10 +16,16 @@ function parseMap(data: unknown, label: string): DoorsMap {
   }
   // Bake nav corners: prefer stored author data, else recompute from walls.
   // Always includes automatic door poles (3 per door, on the door line).
-  map.wallCorners = resolveWallCorners(map.walls, map.wallCorners, map.bounds, {
-    teamA: map.teamA,
-    teamB: map.teamB,
-  });
+  map.wallCorners = resolveWallCorners(
+    map.walls,
+    map.wallCorners,
+    map.bounds,
+    {
+      teamA: map.teamA,
+      teamB: map.teamB,
+    },
+    mapClosureGaps(map),
+  );
   return map;
 }
 

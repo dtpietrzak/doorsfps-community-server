@@ -50,6 +50,10 @@ export function trunc(value: number): number {
 }
 
 const LN2 = 0.6931471805599453;
+const INV_3 = 1 / 3;
+const INV_5 = 1 / 5;
+const INV_6 = 1 / 6;
+const INV_7 = 1 / 7;
 
 /**
  * Positive log1p for heatmap residuals. Range-reduces to [1, 2) then uses a
@@ -71,10 +75,10 @@ export function log1p(value: number): number {
   const f2 = fraction * fraction;
   const series = fraction -
     f2 * 0.5 +
-    f2 * fraction / 3 -
-    f2 * f2 / 4 +
-    f2 * f2 * fraction / 5 -
-    f2 * f2 * f2 / 6 +
-    f2 * f2 * f2 * fraction / 7;
+    f2 * fraction * INV_3 -
+    f2 * f2 * 0.25 +
+    f2 * f2 * fraction * INV_5 -
+    f2 * f2 * f2 * INV_6 +
+    f2 * f2 * f2 * fraction * INV_7;
   return exponent * LN2 + series;
 }

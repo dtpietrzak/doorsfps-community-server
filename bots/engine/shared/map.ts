@@ -24,7 +24,7 @@ export type CornerId = 0 | 1 | 2 | 3;
  * float = hanging slab top-aligned with full walls, bottom at stand head (crouch under).
  */
 export type WallKind = "full" | "half" | "float";
-export type MapMirrorMode = "flipY" | "flipXZ";
+export type MapMirrorMode = "flipY" | "flipXZ" | "zombots";
 
 export type Wall = {
   id: string;
@@ -40,19 +40,29 @@ export function wallKind(wall: Pick<Wall, "kind">): WallKind {
   return "full";
 }
 
-/** Fixed zombie-mode window width (world units). All windows share this size. */
-export const WINDOW_WIDTH = 1.5;
+export {
+  WINDOW_HEAD_Y,
+  WINDOW_SILL_Y,
+  WINDOW_WIDTH,
+} from "../../../shared/world/wallWindows.ts";
 
 /**
- * Zombie-mode crawl-through opening cut into a full interior wall.
- * `center` lies on the referenced wall segment; the opening spans
- * `WINDOW_WIDTH` along the wall, centered there.
+ * Gap cut through a full interior wall. Width and height are fixed.
+ * `center` is the opening's midpoint on the wall.
  */
 export type Window = {
   id: string;
   /** Interior full wall this opening is cut into. */
   wallId: string;
   center: Vec2;
+};
+
+/** Campaign sliding door. `cost` defaults to 500 zompoints when omitted. */
+export type SlidingDoor = {
+  id: string;
+  wallId: string;
+  center: Vec2;
+  cost?: number;
 };
 
 export type TeamSide = {
@@ -141,10 +151,14 @@ export type DoorsMap = {
   teamB: TeamSide;
   walls: Wall[];
   /**
-   * Zombie-mode crawl-through openings cut into full interior walls.
-   * Omitted or [] on maps without zombie windows.
+   * Gaps cut through full interior walls.
+   * Omitted or [] on maps without windows.
    */
   windows?: Window[];
+  /** Sliding doors. Omitted or [] when the map has none. */
+  doors?: SlidingDoor[];
+  /** Zombots spawn pad. Omitted outside zombots. */
+  spawnCorner?: CornerId;
   /**
    * Unique full-wall corner / vertical-edge points for bot nav.
    * Shared endpoints (L/T joints) appear once. Omitted on legacy maps.
@@ -196,14 +210,15 @@ export function doorSegment(
   const [c0, c1] = EDGE_CORNERS[side.edge];
   const p0 = cornerWorld(bounds, c0);
   const p1 = cornerWorld(bounds, c1);
-  const mx = (p0.x + p1.x) / 2;
-  const mz = (p0.z + p1.z) / 2;
+  const mx = (p0.x + p1.x) * 0.5;
+  const mz = (p0.z + p1.z) * 0.5;
   const dx = p1.x - p0.x;
   const dz = p1.z - p0.z;
   const len = distance2(dx, dz) || 1;
-  const ux = dx / len;
-  const uz = dz / len;
-  const hw = min(side.doorHalfWidth, len / 2 - 0.01);
+  const inv = 1 / len;
+  const ux = dx * inv;
+  const uz = dz * inv;
+  const hw = min(side.doorHalfWidth, len * 0.5 - 0.01);
   return [
     { x: mx - ux * hw, z: mz - uz * hw },
     { x: mx + ux * hw, z: mz + uz * hw },

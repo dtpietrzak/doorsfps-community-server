@@ -8,6 +8,7 @@ import { SKILL_ORDER } from "../../shared/sim/skills.ts";
 import { WEAPON_ORDER } from "../../protocol/network.ts";
 import type { Player } from "../../players/Player.ts";
 import type { MapCollision } from "../../world/MapCollision.ts";
+import { SLIDING_DOOR_COST } from "../../shared/world/slidingDoors.ts";
 
 const mapRevisions = new WeakMap<MapCollision, string>();
 const mapDefinitions = new WeakMap<MapCollision, BotMapDefinition>();
@@ -186,6 +187,31 @@ export function buildBotMapDefinition(
     })),
     wallCorners,
     hints: { nudges, camps, sprints, spawns, stuck },
+    ...((map.windows?.length ?? 0) > 0
+      ? {
+        windows: (map.windows ?? []).map((win) => ({
+          id: win.id,
+          wallId: win.wallId,
+          center: { x: win.center.x, z: win.center.z },
+        })),
+      }
+      : {}),
+    ...((map.doors?.length ?? 0) > 0
+      ? {
+        doors: (map.doors ?? []).map((door) => ({
+          id: door.id,
+          wallId: door.wallId,
+          center: { x: door.center.x, z: door.center.z },
+          cost: door.cost ?? SLIDING_DOOR_COST,
+        })),
+      }
+      : {}),
+    ...(map.mirrorMode === "zombots"
+      ? {
+        mirrorMode: "zombots" as const,
+        spawnCorner: map.spawnCorner ?? 0,
+      }
+      : {}),
   };
   mapDefinitions.set(collision, definition);
   return definition;

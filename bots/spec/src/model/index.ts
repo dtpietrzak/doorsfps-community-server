@@ -22,6 +22,19 @@ export type BotMapWall = Readonly<{
   kind: WallKind;
 }>;
 
+export type BotMapWindow = Readonly<{
+  id: string;
+  wallId: string;
+  center: Vec2;
+}>;
+
+export type BotMapDoor = Readonly<{
+  id: string;
+  wallId: string;
+  center: Vec2;
+  cost: number;
+}>;
+
 export type BotMapSide = Readonly<{
   edge: EdgeId;
   doorHalfWidth: number;
@@ -83,6 +96,14 @@ export type BotMapDefinition = Readonly<{
   walls: readonly BotMapWall[];
   wallCorners: readonly Vec2[];
   hints: BotMapHints;
+  /** Omitted when the map has no window gaps. */
+  windows?: readonly BotMapWindow[];
+  /** Omitted when the map has no sliding doors. */
+  doors?: readonly BotMapDoor[];
+  /** Omitted unless this map is zombots. flipY and flipXZ stay off the wire. */
+  mirrorMode?: "zombots";
+  /** Zombots spawn pad. Present with mirrorMode, including 0. */
+  spawnCorner?: 0 | 1 | 2 | 3;
 }>;
 
 export type WeaponSnapshot = Readonly<{

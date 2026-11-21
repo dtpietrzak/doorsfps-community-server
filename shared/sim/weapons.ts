@@ -130,11 +130,11 @@ export const RIFLE: WeaponDef = {
   moveSpeedMult: 0.80,
 };
 
-/** Close-range pump gun: 8 pellets per shot, gentler falloff than the pistol. */
+/** Close-range pump gun: 7 pellets per shot, gentler falloff than the pistol. */
 export const SHOTGUN: WeaponDef = {
   id: WEAPON_SHOTGUN,
   name: "Shotgun",
-  // Per pellet. All 8 on body at point blank = 96.
+  // Per pellet. All 7 on body at point blank = 84.
   bodyDamage: 12,
   headDamage: 18,
   // Includes the pump.
@@ -148,8 +148,9 @@ export const SHOTGUN: WeaponDef = {
   totalClips: 3,
   reloadMs: 2950,
   moveSpeedMult: 0.92,
-  pellets: 8,
-  pelletSpreadDeg: 4.5,
+  pellets: 7,
+  // 4.5° × 1.25: wider cone to punish long shots harder.
+  pelletSpreadDeg: 5.625,
   // Per pellet: body 12 → 3, head 18 → 4.5 at 50+ units.
   falloff: { fullDamageRange: 8, minDamageRange: 50, minMult: 0.25 },
   // Stock bash.

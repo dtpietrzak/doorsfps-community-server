@@ -172,7 +172,7 @@ import {
   runYawIntentStep,
   runYawPoleStep,
 } from "../thoughts/index.ts";
-import { clamp, clamp01, max, PI } from "../math/index.ts";
+import { clamp, clamp01, max, RAD_PER_DEG } from "../math/index.ts";
 import {
   defaultBrainHooks,
   type BrainHooks,
@@ -443,8 +443,8 @@ export class BotBrain {
     );
     const deg = config.shootAimHalfAngleDeg;
     this.shootAimHalfAngleRad = Number.isFinite(deg) && deg > 0
-      ? (deg * PI) / 180
-      : PI / 180;
+      ? deg * RAD_PER_DEG
+      : RAD_PER_DEG;
     this.lookAim = {
       fittsASec: max(0, finiteOrZero(config.aimFittsASec)),
       fittsBSec: max(0, finiteOrZero(config.aimFittsBSec)),
@@ -459,7 +459,7 @@ export class BotBrain {
       pursuitLagMs: max(0, finiteOrZero(config.aimPursuitLagMs)),
       combatWidthRad: this.shootAimHalfAngleRad,
     };
-    this.pursuitLagSec = this.lookAim.pursuitLagMs / 1000;
+    this.pursuitLagSec = this.lookAim.pursuitLagMs * 0.001;
     this.reactionBaseMs = max(
       0,
       Number.isFinite(config.reactionBaseMs) ? config.reactionBaseMs : 0,

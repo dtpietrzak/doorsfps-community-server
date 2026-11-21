@@ -3,7 +3,7 @@
  * (server-community/combat/hitscan.ts, client hitVolumes.ts). Not map radius.
  */
 
-import { distance2, max } from "../math/index.ts";
+import { distance2, distanceSquared2, max } from "../math/index.ts";
 import {
   MOVE_CROUCH_COLLISION_H,
   MOVE_CROUCH_EYE,
@@ -102,11 +102,12 @@ export function moverCenterInside(
   obstacles: readonly PlayerClipPose[],
 ): boolean {
   const r = PLAYER_CLIP_RADIUS;
+  const rSq = r * r;
   const moverCrouch = Boolean(mover.crouch);
   for (const other of obstacles) {
     if (other.id && mover.id && other.id === mover.id) continue;
     if (!bodyHitboxesOverlapY(mover.y, moverCrouch, other)) continue;
-    if (distance2(mover.x - other.x, mover.z - other.z) < r) return true;
+    if (distanceSquared2(mover.x - other.x, mover.z - other.z) < rSq) return true;
   }
   return false;
 }

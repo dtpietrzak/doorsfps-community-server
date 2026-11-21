@@ -287,6 +287,10 @@ class Reader {
     return this.bytes[7]!;
   }
 
+  remaining(): number {
+    return this.bytes.byteLength - this.offset;
+  }
+
   requestId(): number {
     return this.view.getUint32(8, true);
   }
@@ -447,6 +451,34 @@ function writeMap(writer: Writer, map: BotMapDefinition): void {
     writer.f64(hint.radius);
     writer.f64(hint.yaw);
   }
+  // Trailing sections stay off a plain map. A door or zombots map writes a
+  // window count first (zero when there are no windows) so the reader can
+  // tell the sections apart. flipY / flipXZ are not written.
+  const windows = map.windows ?? [];
+  const doors = map.doors ?? [];
+  const zombots = map.mirrorMode === "zombots";
+  if (windows.length > 0 || doors.length > 0 || zombots) {
+    writer.u32(windows.length);
+    for (const win of windows) {
+      writer.string(win.id);
+      writer.string(win.wallId);
+      writePoint(writer, win.center);
+    }
+  }
+  if (doors.length > 0 || zombots) {
+    writer.u32(doors.length);
+    for (const door of doors) {
+      writer.string(door.id);
+      writer.string(door.wallId);
+      writePoint(writer, door.center);
+      const cost = Number.isFinite(door.cost) ? door.cost : 500;
+      writer.u16(Math.max(0, Math.min(65535, Math.round(cost))));
+    }
+  }
+  if (zombots) {
+    const corner = map.spawnCorner ?? 0;
+    writer.u8(corner === 1 || corner === 2 || corner === 3 ? corner : 0);
+  }
 }
 
 function readMap(reader: Reader): BotMapDefinition {
@@ -554,6 +586,43 @@ function readMap(reader: Reader): BotMapDefinition {
       yaw: reader.f64(),
     });
   }
+  const windows: Array<{
+    id: string;
+    wallId: string;
+    center: { x: number; z: number };
+  }> = [];
+  if (reader.remaining() > 0) {
+    const windowCount = reader.u32();
+    for (let index = 0; index < windowCount; index += 1) {
+      windows.push({
+        id: reader.string(),
+        wallId: reader.string(),
+        center: readPoint(reader),
+      });
+    }
+  }
+  const doors: Array<{
+    id: string;
+    wallId: string;
+    center: { x: number; z: number };
+    cost: number;
+  }> = [];
+  if (reader.remaining() > 0) {
+    const doorCount = reader.u32();
+    for (let index = 0; index < doorCount; index += 1) {
+      doors.push({
+        id: reader.string(),
+        wallId: reader.string(),
+        center: readPoint(reader),
+        cost: reader.u16(),
+      });
+    }
+  }
+  let spawnCorner: 0 | 1 | 2 | 3 | undefined;
+  if (reader.remaining() > 0) {
+    const corner = reader.u8();
+    spawnCorner = corner === 1 || corner === 2 || corner === 3 ? corner : 0;
+  }
   return {
     id,
     revision,
@@ -564,6 +633,11 @@ function readMap(reader: Reader): BotMapDefinition {
     walls,
     wallCorners,
     hints: { nudges, camps, sprints, spawns, stuck },
+    ...(windows.length > 0 ? { windows } : {}),
+    ...(doors.length > 0 ? { doors } : {}),
+    ...(spawnCorner !== undefined
+      ? { mirrorMode: "zombots" as const, spawnCorner }
+      : {}),
   };
 }
 

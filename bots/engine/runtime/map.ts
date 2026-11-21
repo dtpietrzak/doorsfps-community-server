@@ -6,7 +6,8 @@ import {
   type DoorsMap,
   type TeamSide,
 } from "../shared/map.ts";
-import { computeWallCorners } from "../../../shared/world/wallCorners.ts";
+import { computeWallCorners, mapClosureGaps } from "../../../shared/world/wallCorners.ts";
+import { SLIDING_DOOR_COST } from "../../../shared/world/slidingDoors.ts";
 
 function side(source: BotMapDefinition["teamA"]): TeamSide {
   const corners = EDGE_CORNERS[source.edge];
@@ -96,11 +97,47 @@ export function runtimeMap(source: BotMapDefinition): DoorsMap {
       kind: wall.kind,
     });
   }
+  const windows: DoorsMap["windows"] = [];
+  const sourceWindows = source.windows ?? [];
+  for (let i = 0; i < sourceWindows.length; i++) {
+    const win = sourceWindows[i]!;
+    windows.push({
+      id: win.id,
+      wallId: win.wallId,
+      center: { x: win.center.x, z: win.center.z },
+    });
+  }
+  const doors: DoorsMap["doors"] = [];
+  const sourceDoors = source.doors ?? [];
+  for (let i = 0; i < sourceDoors.length; i++) {
+    const door = sourceDoors[i]!;
+    const cost = door.cost ?? SLIDING_DOOR_COST;
+    doors.push({
+      id: door.id,
+      wallId: door.wallId,
+      center: { x: door.center.x, z: door.center.z },
+      ...(cost === SLIDING_DOOR_COST ? {} : { cost }),
+    });
+  }
+  const teamA = side(source.teamA);
+  const teamB = side(source.teamB);
   // Maps saved without corners (every campaign map) get them once here, so
   // polesForTeam never rebuilds wall polygons inside a think.
   const wallCorners = source.wallCorners.length > 0
     ? copyPoints(source.wallCorners)
-    : computeWallCorners(walls, source.bounds);
+    : computeWallCorners(
+      walls,
+      source.bounds,
+      mapClosureGaps({
+        walls,
+        windows,
+        doors,
+        bounds: source.bounds,
+        mirrorMode: source.mirrorMode,
+        teamA,
+        teamB,
+      }),
+    );
 
   return {
     version: source.formatVersion === 1 ? 1 : MAP_FORMAT_VERSION,
@@ -112,11 +149,19 @@ export function runtimeMap(source: BotMapDefinition): DoorsMap {
       maxZ: source.bounds.maxZ,
     },
     gridSize: 1,
-    teamA: side(source.teamA),
-    teamB: side(source.teamB),
+    teamA,
+    teamB,
     walls,
     wallCorners,
     botHints: hints,
+    ...(windows.length > 0 ? { windows } : {}),
+    ...(doors.length > 0 ? { doors } : {}),
+    ...(source.mirrorMode === "zombots"
+      ? {
+        mirrorMode: "zombots" as const,
+        spawnCorner: source.spawnCorner ?? 0,
+      }
+      : {}),
   };
 }
 

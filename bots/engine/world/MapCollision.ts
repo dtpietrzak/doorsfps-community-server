@@ -6,6 +6,8 @@ import {
   type Vec2,
   wallKind,
 } from "../shared/map.ts";
+import { slidingDoorBlock } from "../../../shared/world/slidingDoors.ts";
+import { authoredWallSpans } from "../../../shared/world/wallWindows.ts";
 import {
   DOOR_CLOSED_STANDOFF,
   DOOR_POST_WIDTH,
@@ -18,14 +20,17 @@ import {
   clamp,
   distance2,
   distance3,
+  distanceSquared2,
   fastAtan2,
-  fastCos,
-  fastSin,
+  fastSinCosInto,
   floor,
   max,
   min,
   TWO_PI,
 } from "../math/index.ts";
+
+/** Reused by fastSinCosInto. Copy sin and cos out before the next call. */
+const SIN_COS = { sin: 0, cos: 0 };
 
 export const PLAYER_RADIUS = 0.35;
 export const WALL_HALF_THICK = 0.22;
@@ -147,11 +152,38 @@ export class MapCollision {
     for (let i = 0; i < source.length; i++) {
       const w = source[i]!;
       const range = verticalRangeForKind(wallKind(w));
+      const spans = authoredWallSpans(
+        w,
+        map.windows,
+        range.yMin,
+        range.yMax,
+        map.doors,
+      );
+      for (let s = 0; s < spans.length; s++) {
+        const span = spans[s]!;
+        this.walls.push({
+          a: copyVec2(span.a),
+          b: copyVec2(span.b),
+          yMin: span.yMin,
+          yMax: span.yMax,
+        });
+      }
+    }
+    const doors = map.doors ?? [];
+    for (let d = 0; d < doors.length; d++) {
+      const door = doors[d]!;
+      let wall = null;
+      for (let i = 0; i < source.length; i++) {
+        if (source[i]!.id === door.wallId) wall = source[i]!;
+      }
+      if (!wall) continue;
+      const block = slidingDoorBlock(wall, door.center);
+      if (!block) continue;
       this.walls.push({
-        a: copyVec2(w.a),
-        b: copyVec2(w.b),
-        yMin: range.yMin,
-        yMax: range.yMax,
+        a: copyVec2(block.a),
+        b: copyVec2(block.b),
+        yMin: 0,
+        yMax: WALL_HEIGHT,
       });
     }
     this.buildPerimeterWithDoorGaps();
@@ -198,10 +230,11 @@ export class MapCollision {
   ): number | null {
     const len = distance3(direction.x, direction.y, direction.z);
     if (len < 1e-12 || maxRange <= 0) return null;
+    const inv = 1 / len;
     const dir: Vec3 = {
-      x: direction.x / len,
-      y: direction.y / len,
-      z: direction.z / len,
+      x: direction.x * inv,
+      y: direction.y * inv,
+      z: direction.z * inv,
     };
 
     let best: number | null = null;
@@ -303,6 +336,9 @@ export class MapCollision {
     z: number,
     radius: number,
   ): { x: number; z: number } {
+    if (this.map.mirrorMode === "zombots") {
+      return clampToArenaBounds(x, z, radius, this.map);
+    }
     if (this.doorWalkInEnabled) {
       return clampToBoundsWithDoorWalkIn(x, z, radius, this.map);
     }
@@ -465,8 +501,11 @@ export class MapCollision {
     distance = 0.9,
     radius = PLAYER_RADIUS,
   ): "clear" | "crouchable" | "jumpable" | "blocked" {
-    const tx = x - fastSin(yaw) * distance;
-    const tz = z - fastCos(yaw) * distance;
+    fastSinCosInto(yaw, SIN_COS);
+    const sin = SIN_COS.sin;
+    const cos = SIN_COS.cos;
+    const tx = x - sin * distance;
+    const tz = z - cos * distance;
     return this.classifyProbe(tx, tz, radius);
   }
 
@@ -517,8 +556,11 @@ export class MapCollision {
     // Face into the map (forward = (−sin yaw, −cos yaw)) when no capture yaw.
     let outYaw = fastAtan2(-own.inwardX, -own.inwardZ);
     if (yaw !== undefined) {
-      const fx = -fastSin(yaw);
-      const fz = -fastCos(yaw);
+      fastSinCosInto(yaw, SIN_COS);
+      const sin = SIN_COS.sin;
+      const cos = SIN_COS.cos;
+      const fx = -sin;
+      const fz = -cos;
       const fAlong = fx * enemy.alongX + fz * enemy.alongZ;
       const fInward = fx * enemy.inwardX + fz * enemy.inwardZ;
       const ox = fAlong * own.alongX + (-fInward) * own.inwardX;
@@ -533,8 +575,14 @@ export class MapCollision {
     const corner = this.spawnRng() < 0.5 ? side.corners[0] : side.corners[1];
     const c = cornerWorld(this.map.bounds, corner);
     const { minX, maxX, minZ, maxZ } = this.map.bounds;
-    const cx = (minX + maxX) / 2;
-    const cz = (minZ + maxZ) / 2;
+    const cx = (minX + maxX) * 0.5;
+    const cz = (minZ + maxZ) * 0.5;
+    const towardX = cx - c.x;
+    const towardZ = cz - c.z;
+    const tlen = distance2(towardX, towardZ) || 1;
+    const tInv = 1 / tlen;
+    const spawnReach = side.spawnRadius * 1.2;
+    const spawnReachSq = spawnReach * spawnReach;
 
     // Sample a few times for a free-ish point inside spawn radius.
     let x = c.x;
@@ -543,18 +591,21 @@ export class MapCollision {
       const ang = this.spawnRng() * TWO_PI;
       const r = this.spawnRng() * side.spawnRadius;
       // Bias slightly toward map center so we don't sit in the wall.
-      const towardX = cx - c.x;
-      const towardZ = cz - c.z;
-      const tlen = distance2(towardX, towardZ) || 1;
-      const nx = c.x + fastCos(ang) * r * 0.55 +
-        (towardX / tlen) * (0.8 + this.spawnRng());
-      const nz = c.z + fastSin(ang) * r * 0.55 +
-        (towardZ / tlen) * (0.8 + this.spawnRng());
+      fastSinCosInto(ang, SIN_COS);
+      const angSin = SIN_COS.sin;
+      const angCos = SIN_COS.cos;
+      const nx = c.x + angCos * r * 0.55 +
+        towardX * tInv * (0.8 + this.spawnRng());
+      const nz = c.z + angSin * r * 0.55 +
+        towardZ * tInv * (0.8 + this.spawnRng());
       const resolved = this.resolvePosition(nx, nz);
       x = resolved.x;
       z = resolved.z;
-      // Prefer points not too close to the outer wall corner
-      if (distance2(x - c.x, z - c.z) < side.spawnRadius * 1.2) break;
+      // Prefer points not too close to the outer wall corner.
+      // A negative radius never matches a real distance.
+      if (spawnReach > 0 && distanceSquared2(x - c.x, z - c.z) < spawnReachSq) {
+        break;
+      }
     }
 
     // Face toward map center (forward = (−sin yaw, −cos yaw)).
@@ -569,24 +620,25 @@ export class MapCollision {
     const b = this.map.bounds;
     const doorA = doorSegment(b, this.map.teamA);
     const doorB = doorSegment(b, this.map.teamB);
+    const gaps = this.map.mirrorMode === "zombots" ? [] : [doorA, doorB];
 
     // Four outer edges, split by door openings when the door lies on that edge.
     addEdgeWithGap(this.perimeter, { x: b.minX, z: b.minZ }, {
       x: b.maxX,
       z: b.minZ,
-    }, [doorA, doorB]); // south
+    }, gaps); // south
     addEdgeWithGap(this.perimeter, { x: b.maxX, z: b.minZ }, {
       x: b.maxX,
       z: b.maxZ,
-    }, [doorA, doorB]); // east
+    }, gaps); // east
     addEdgeWithGap(this.perimeter, { x: b.maxX, z: b.maxZ }, {
       x: b.minX,
       z: b.maxZ,
-    }, [doorA, doorB]); // north
+    }, gaps); // north
     addEdgeWithGap(this.perimeter, { x: b.minX, z: b.maxZ }, {
       x: b.minX,
       z: b.minZ,
-    }, [doorA, doorB]); // west
+    }, gaps); // west
   }
 }
 
@@ -612,8 +664,8 @@ function doorFrame(
   const door = doorSegment(map.bounds, side);
   const d0 = door[0];
   const d1 = door[1];
-  const mid = { x: (d0.x + d1.x) / 2, z: (d0.z + d1.z) / 2 };
-  const halfLen = distance2(d1.x - d0.x, d1.z - d0.z) / 2;
+  const mid = { x: (d0.x + d1.x) * 0.5, z: (d0.z + d1.z) * 0.5 };
+  const halfLen = distance2(d1.x - d0.x, d1.z - d0.z) * 0.5;
 
   // Consistent world axes so opposite edges share the same "left/right" sense.
   let alongX = 0;
@@ -625,15 +677,30 @@ function doorFrame(
   }
 
   const { minX, maxX, minZ, maxZ } = map.bounds;
-  const cx = (minX + maxX) / 2;
-  const cz = (minZ + maxZ) / 2;
+  const cx = (minX + maxX) * 0.5;
+  const cz = (minZ + maxZ) * 0.5;
   let inwardX = cx - mid.x;
   let inwardZ = cz - mid.z;
   const ilen = distance2(inwardX, inwardZ) || 1;
-  inwardX /= ilen;
-  inwardZ /= ilen;
+  const iInv = 1 / ilen;
+  inwardX *= iInv;
+  inwardZ *= iInv;
 
   return { mid, alongX, alongZ, inwardX, inwardZ, halfLen };
+}
+
+/** Rectangle clamp. Zombots has no energy-door pocket and no pane standoff. */
+function clampToArenaBounds(
+  x: number,
+  z: number,
+  radius: number,
+  map: DoorsMap,
+): { x: number; z: number } {
+  const { minX, maxX, minZ, maxZ } = map.bounds;
+  return {
+    x: min(max(x, minX + radius), maxX - radius),
+    z: min(max(z, minZ + radius), maxZ - radius),
+  };
 }
 
 /**
@@ -871,8 +938,9 @@ function segmentWithEndInset(
   const dz = b.z - a.z;
   const len = distance2(dx, dz);
   if (len < 2 * inset + 1e-6) return null;
-  const ux = dx / len;
-  const uz = dz / len;
+  const inv = 1 / len;
+  const ux = dx * inv;
+  const uz = dz * inv;
   return {
     a: { x: a.x + ux * inset, z: a.z + uz * inset },
     b: { x: b.x - ux * inset, z: b.z - uz * inset },
@@ -927,12 +995,14 @@ function pushCircleFromSegment(
   if (dist < 1e-8) {
     // Centered on segment — push along a perpendicular
     const plen = distance2(abx, abz) || 1;
-    nx = -abz / plen;
-    nz = abx / plen;
+    const pInv = 1 / plen;
+    nx = -abz * pInv;
+    nz = abx * pInv;
     dist = 0;
   } else {
-    nx /= dist;
-    nz /= dist;
+    const dInv = 1 / dist;
+    nx *= dInv;
+    nz *= dInv;
   }
 
   const push = minDist - dist;
@@ -958,8 +1028,9 @@ function rayThickSegment(
   const segLen = distance2(abx, abz);
   if (segLen < 1e-8) return null;
 
-  const ax = abx / segLen;
-  const az = abz / segLen;
+  const segInv = 1 / segLen;
+  const ax = abx * segInv;
+  const az = abz * segInv;
   // Perpendicular in XZ (right-handed with up = +Y).
   const px = -az;
   const pz = ax;
@@ -1046,7 +1117,8 @@ function probeReachable(
   gotZ: number,
   eps = 0.08,
 ): boolean {
-  return distance2(gotX - wantX, gotZ - wantZ) <= eps;
+  if (!(eps >= 0)) return false;
+  return distanceSquared2(gotX - wantX, gotZ - wantZ) <= eps * eps;
 }
 
 /** Walkable half-width for a player center between the rendered door posts. */

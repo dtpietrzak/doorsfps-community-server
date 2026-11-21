@@ -1,5 +1,8 @@
 import { clamp01 } from "./scalar.ts";
 
+const INV_6 = 1 / 6;
+const INV_24 = 1 / 24;
+
 /**
  * Approximate e^-x for motor smoothing and correlated aim noise.
  *
@@ -13,7 +16,7 @@ export function fastExpNegative(value: number): number {
 
   const x = value * 0.0625;
   const x2 = x * x;
-  let result = 1 - x + x2 * 0.5 - x2 * x / 6 + x2 * x2 / 24;
+  let result = 1 - x + x2 * 0.5 - x2 * x * INV_6 + x2 * x2 * INV_24;
   result *= result;
   result *= result;
   result *= result;

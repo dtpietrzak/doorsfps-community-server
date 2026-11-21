@@ -44,7 +44,7 @@ export const BOT_YAW_TAU_SEC = BOT_YAW_LOOK_TAU_SEC;
 export const BOT_YAW_180_TURN_SEC = BOT_YAW_LOOK_TAU_SEC * 3;
 
 /** Sim dt used when the caller does not pass one (one 60 Hz simulation tick). */
-export const BOT_YAW_EASE_DT = 1 / 60;
+export const BOT_YAW_EASE_DT = 0.016666666666666666;
 
 /**
  * Bot-state key for the nav-channel look intent (raw path desired yaw).

@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
-import { computeWallCorners } from "../../../shared/world/wallCorners.ts";
+import { computeWallCorners, mapClosureGaps } from "../../../shared/world/wallCorners.ts";
 import { courtyardProbeMapDefinition } from "../world/courtyardProbeMap.ts";
 import { runtimeMap } from "./map.ts";
 
@@ -13,5 +13,8 @@ Deno.test("runtimeMap computes corners once for a map saved without them", () =>
   const source = { ...courtyardProbeMapDefinition(), wallCorners: [] };
   const map = runtimeMap(source);
   assert(map.wallCorners !== undefined && map.wallCorners.length > 0);
-  assertEquals(map.wallCorners, computeWallCorners(map.walls, map.bounds));
+  assertEquals(
+    map.wallCorners,
+    computeWallCorners(map.walls, map.bounds, mapClosureGaps(map)),
+  );
 });

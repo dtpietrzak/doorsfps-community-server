@@ -67,11 +67,13 @@ export function approximateDistance2(dx: number, dz: number): number {
 export function normalize2(x: number, z: number): Normalized2 {
   const length = distance2(x, z);
   if (length <= 0.000000001) return { x: 0, z: 0, length: 0 };
-  return { x: x / length, z: z / length, length };
+  const inv = 1 / length;
+  return { x: x * inv, z: z * inv, length };
 }
 
 export function normalize3(x: number, y: number, z: number): Normalized3 {
   const length = distance3(x, y, z);
   if (length <= 0.000000001) return { x: 0, y: 0, z: 0, length: 0 };
-  return { x: x / length, y: y / length, z: z / length, length };
+  const inv = 1 / length;
+  return { x: x * inv, y: y * inv, z: z * inv, length };
 }

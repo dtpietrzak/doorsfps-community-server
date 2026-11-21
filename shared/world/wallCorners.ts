@@ -14,14 +14,16 @@
 import {
   abs,
   distance2,
-  fastCos,
-  fastSin,
+  distanceSquared2,
+  fastSinCosInto,
   max,
   min,
   PI,
   refinedAtan2,
   round,
   TWO_PI,
+  RAD_PER_DEG,
+  HALF_PI,
 } from "../math/index.ts";
 import {
   findClosedWallPolygons,
@@ -29,6 +31,7 @@ import {
   type WallPolyPoint,
   type WallSegment,
 } from "./wallPolygons.ts";
+import { interiorOpeningGaps } from "./wallWindows.ts";
 
 export type WallCornerPoint = { x: number; z: number };
 
@@ -48,7 +51,7 @@ export const WALL_CORNER_OFFSET = 1.2;
  * Horizontal half-angle of the **player facing** FOV wedge (green).
  * π/4 ⇒ 90° full width. Shared by client debug overlay + server yawPole.
  */
-export const YAW_PLAYER_FOV_HALF_ANGLE = PI / 3;
+export const YAW_PLAYER_FOV_HALF_ANGLE = PI * 0.3333333333333333;
 
 /**
  * Horizontal half-angle of the **movement** FOV wedge (cyan).
@@ -56,20 +59,20 @@ export const YAW_PLAYER_FOV_HALF_ANGLE = PI / 3;
  * Centered on the horizontal move direction (wish / slide / velocity).
  * Shared by client debug overlay + server yawPole.
  */
-export const YAW_MOVEMENT_FOV_HALF_ANGLE = PI / 2;
+export const YAW_MOVEMENT_FOV_HALF_ANGLE = HALF_PI;
 
 /**
  * Horizontal half-angle of the **enemy-door** band (yellow).
  * π/4 ⇒ 90° full width. Independent of player FOV — tweak separately.
  * Shared by client debug overlay + server yawPole.
  */
-export const YAW_DOOR_FOV_HALF_ANGLE = PI / 3;
+export const YAW_DOOR_FOV_HALF_ANGLE = PI * 0.3333333333333333;
 
 /**
  * Half-angle of the bot **shoot / click** aim box (±1° yaw and pitch from
  * eye center). Shared by server click step + client Y-debug overlay.
  */
-export const SHOOT_AIM_FOV_HALF_ANGLE = PI / 180;
+export const SHOOT_AIM_FOV_HALF_ANGLE = RAD_PER_DEG;
 
 /**
  * Yaw poles within this horizontal distance are treated as "already there"
@@ -82,8 +85,12 @@ export const YAW_POLE_SKIP_RADIUS = 1;
 const VERTEX_EPS = 1e-4;
 /** Drop degenerate wall pieces. */
 const MIN_SEG_LEN = 1e-4;
+const MIN_SEG_LEN_SQ = MIN_SEG_LEN * MIN_SEG_LEN;
+
+/** Reused by fastSinCosInto. Copy sin and cos out before the next call. */
+const SIN_COS = { sin: 0, cos: 0 };
 /** |θ − π| below this ⇒ collinear continuous wall (skip sector). */
-const COLLINEAR_ANGLE_EPS = (8 * PI) / 180;
+const COLLINEAR_ANGLE_EPS = 8 * RAD_PER_DEG;
 /**
  * Joint yaw dots only in sectors **outside** any wall angle.
  * Outside ⇒ sector strictly larger than 180° (plus collinear slack so near-flat
@@ -376,7 +383,8 @@ function unitFromTo(
   const dz = to.z - from.z;
   const len = distance2(dx, dz);
   if (len < MIN_SEG_LEN) return null;
-  return { x: dx / len, z: dz / len };
+  const inv = 1 / len;
+  return { x: dx * inv, z: dz * inv };
 }
 
 /** CCW angle from unit d0 to unit d1 in [0, 2π). */
@@ -391,8 +399,9 @@ function sectorBisector(
   sectorAngle: number,
 ): WallCornerPoint {
   const a0 = refinedAtan2(d0.z, d0.x);
-  const mid = a0 + sectorAngle / 2;
-  return { x: fastCos(mid), z: fastSin(mid) };
+  const mid = a0 + sectorAngle * 0.5;
+  fastSinCosInto(mid, SIN_COS);
+  return { x: SIN_COS.cos, z: SIN_COS.sin };
 }
 
 /** True when the sector is the exterior of a wall corner (never ≤ 180°). */
@@ -415,13 +424,21 @@ type GraphEdge = {
 export function computeWallCorners(
   walls: readonly WallCornerSegment[],
   bounds?: WallCornerBounds | null,
+  /**
+   * Window, sliding-door, and energy-door spans. Used only to decide which
+   * pockets are solid. The yaw graph keeps the full wall edges: a window
+   * sill still blocks walking.
+   */
+  gaps?: readonly WallSegment[] | null,
 ): WallCornerPoint[] {
   const interiorSegs: WallSegment[] = [];
   for (const wall of walls) {
     if (!isFullWall(wall.kind)) continue;
     if (!Number.isFinite(wall.a.x) || !Number.isFinite(wall.a.z)) continue;
     if (!Number.isFinite(wall.b.x) || !Number.isFinite(wall.b.z)) continue;
-    if (distance2(wall.b.x - wall.a.x, wall.b.z - wall.a.z) < MIN_SEG_LEN) {
+    if (
+      distanceSquared2(wall.b.x - wall.a.x, wall.b.z - wall.a.z) < MIN_SEG_LEN_SQ
+    ) {
       continue;
     }
     interiorSegs.push({
@@ -499,7 +516,7 @@ export function computeWallCorners(
   }
 
   // Solid pockets for sector rejection (same rules as map-builder fill).
-  const solids = findClosedWallPolygons(interiorSegs, bounds ?? null);
+  const solids = findClosedWallPolygons(interiorSegs, bounds ?? null, gaps);
 
   const emitted = new Map<string, WallCornerPoint>();
   /**
@@ -615,8 +632,8 @@ function doorYawDotsForSide(
   const ends = doorLineSegment(bounds, side);
   const d0 = ends[0];
   const d1 = ends[1];
-  const midX = (d0.x + d1.x) / 2;
-  const midZ = (d0.z + d1.z) / 2;
+  const midX = (d0.x + d1.x) * 0.5;
+  const midZ = (d0.z + d1.z) * 0.5;
   return [
     { x: d0.x, z: d0.z },
     { x: midX, z: midZ },
@@ -654,14 +671,15 @@ export function doorLineSegment(
       p1 = { x: minX, z: minZ };
       break;
   }
-  const mx = (p0.x + p1.x) / 2;
-  const mz = (p0.z + p1.z) / 2;
+  const mx = (p0.x + p1.x) * 0.5;
+  const mz = (p0.z + p1.z) * 0.5;
   const dx = p1.x - p0.x;
   const dz = p1.z - p0.z;
   const len = distance2(dx, dz) || 1;
-  const ux = dx / len;
-  const uz = dz / len;
-  const hw = min(side.doorHalfWidth, len / 2 - 0.01);
+  const inv = 1 / len;
+  const ux = dx * inv;
+  const uz = dz * inv;
+  const hw = min(side.doorHalfWidth, len * 0.5 - 0.01);
   return [
     { x: mx - ux * hw, z: mz - uz * hw },
     { x: mx + ux * hw, z: mz + uz * hw },
@@ -683,9 +701,38 @@ function mergeCornerLists(
 }
 
 /**
+ * Openings the closure walk removes: windows and sliding doors on full
+ * walls, plus both teams' energy-door spans. Zombots seals the energy
+ * doors, so those spans are omitted. The yaw graph itself is not cut.
+ */
+export function mapClosureGaps(map: {
+  walls: readonly (WallCornerSegment & { id?: string })[];
+  windows?: readonly { wallId: string; center: WallCornerPoint }[] | null;
+  doors?: readonly { wallId: string; center: WallCornerPoint }[] | null;
+  bounds?: WallCornerBounds | null;
+  mirrorMode?: string | null;
+  teamA?: DoorYawDotSide | null;
+  teamB?: DoorYawDotSide | null;
+}): WallSegment[] {
+  const gaps: WallSegment[] = interiorOpeningGaps(
+    map.walls,
+    map.windows ?? undefined,
+    map.doors ?? undefined,
+  );
+  if (map.mirrorMode === "zombots") return gaps;
+  if (!map.bounds || !map.teamA || !map.teamB) return gaps;
+  const a = doorLineSegment(map.bounds, map.teamA);
+  const b = doorLineSegment(map.bounds, map.teamB);
+  gaps.push({ a: a[0], b: a[1] }, { a: b[0], b: b[1] });
+  return gaps;
+}
+
+/**
  * Prefer author-stored corners from the map file; recompute from walls when
  * missing or empty so legacy maps still get nav corners at runtime.
  * When `doors` is provided, always append automatic door yaw-dots (3 per door).
+ * `gaps` affect only that recompute (solid pockets). Stored corners are kept
+ * as authored.
  */
 export function resolveWallCorners(
   walls: readonly WallCornerSegment[],
@@ -695,6 +742,7 @@ export function resolveWallCorners(
     teamA: DoorYawDotSide;
     teamB: DoorYawDotSide;
   } | null,
+  gaps?: readonly WallSegment[] | null,
 ): WallCornerPoint[] {
   let corners: WallCornerPoint[];
   if (stored !== null && stored !== undefined && stored.length > 0) {
@@ -705,7 +753,7 @@ export function resolveWallCorners(
       corners.push({ x: p.x, z: p.z });
     }
   } else {
-    corners = computeWallCorners(walls, bounds);
+    corners = computeWallCorners(walls, bounds, gaps);
   }
   if (bounds && doors?.teamA && doors?.teamB) {
     corners = mergeCornerLists(

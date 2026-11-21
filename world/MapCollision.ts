@@ -6,6 +6,8 @@ import {
   type Vec2,
   wallKind,
 } from "./map.ts";
+import { slidingDoorBlock } from "../shared/world/slidingDoors.ts";
+import { authoredWallSpans } from "../shared/world/wallWindows.ts";
 import {
   DOOR_CLOSED_STANDOFF,
   DOOR_POST_WIDTH,
@@ -160,11 +162,32 @@ export class MapCollision {
     this.map = map;
     for (const w of map.walls) {
       const range = verticalRangeForKind(wallKind(w));
+      const spans = authoredWallSpans(
+        w,
+        map.windows,
+        range.yMin,
+        range.yMax,
+        map.doors,
+      );
+      for (const span of spans) {
+        this.walls.push({
+          a: { x: span.a.x, z: span.a.z },
+          b: { x: span.b.x, z: span.b.z },
+          yMin: span.yMin,
+          yMax: span.yMax,
+        });
+      }
+    }
+    for (const door of map.doors ?? []) {
+      const wall = map.walls.find((w) => w.id === door.wallId);
+      if (!wall) continue;
+      const block = slidingDoorBlock(wall, door.center);
+      if (!block) continue;
       this.walls.push({
-        a: { ...w.a },
-        b: { ...w.b },
-        yMin: range.yMin,
-        yMax: range.yMax,
+        a: { x: block.a.x, z: block.a.z },
+        b: { x: block.b.x, z: block.b.z },
+        yMin: 0,
+        yMax: WALL_HEIGHT,
       });
     }
     this.buildPerimeterWithDoorGaps();
@@ -355,6 +378,9 @@ export class MapCollision {
     z: number,
     radius: number,
   ): { x: number; z: number } {
+    if (this.map.mirrorMode === "zombots") {
+      return clampToArenaBounds(x, z, radius, this.map);
+    }
     if (this.doorWalkInEnabled) {
       return clampToBoundsWithDoorWalkIn(x, z, radius, this.map);
     }
@@ -695,24 +721,26 @@ export class MapCollision {
     const b = this.map.bounds;
     const doorA = doorSegment(b, this.map.teamA);
     const doorB = doorSegment(b, this.map.teamB);
+    // Zombots has no energy doors, so the perimeter stays solid.
+    const gaps = this.map.mirrorMode === "zombots" ? [] : [doorA, doorB];
 
     // Four outer edges, split by door openings when the door lies on that edge.
     addEdgeWithGap(this.perimeter, { x: b.minX, z: b.minZ }, {
       x: b.maxX,
       z: b.minZ,
-    }, [doorA, doorB]); // south
+    }, gaps); // south
     addEdgeWithGap(this.perimeter, { x: b.maxX, z: b.minZ }, {
       x: b.maxX,
       z: b.maxZ,
-    }, [doorA, doorB]); // east
+    }, gaps); // east
     addEdgeWithGap(this.perimeter, { x: b.maxX, z: b.maxZ }, {
       x: b.minX,
       z: b.maxZ,
-    }, [doorA, doorB]); // north
+    }, gaps); // north
     addEdgeWithGap(this.perimeter, { x: b.minX, z: b.maxZ }, {
       x: b.minX,
       z: b.minZ,
-    }, [doorA, doorB]); // west
+    }, gaps); // west
   }
 }
 
@@ -754,6 +782,20 @@ function doorFrame(
   inwardZ /= ilen;
 
   return { mid, alongX, alongZ, inwardX, inwardZ, halfLen };
+}
+
+/** Rectangle clamp. Zombots has no energy-door pocket and no pane standoff. */
+function clampToArenaBounds(
+  x: number,
+  z: number,
+  radius: number,
+  map: DoorsMap,
+): { x: number; z: number } {
+  const { minX, maxX, minZ, maxZ } = map.bounds;
+  return {
+    x: min(max(x, minX + radius), maxX - radius),
+    z: min(max(z, minZ + radius), maxZ - radius),
+  };
 }
 
 /**

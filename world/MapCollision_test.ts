@@ -16,6 +16,8 @@ import {
 } from "./MapCollision.ts";
 import type { DoorsMap } from "./map.ts";
 import { DOOR_POST_WIDTH, DOOR_WALK_IN } from "../shared/sim/game.ts";
+import { STAND_EYE_HEIGHT } from "../shared/sim/playerHitVolumes.ts";
+import { WINDOW_HEAD_Y, WINDOW_SILL_Y } from "../shared/world/wallWindows.ts";
 
 function testMap(walls: DoorsMap["walls"] = []): DoorsMap {
   return {
@@ -687,4 +689,60 @@ Deno.test("portalFromEnemyDoor does not clamp along when dest door is narrower",
     to.map.teamA,
   );
   assertEquals(Math.abs(home.x - captureX) < 1e-6, true);
+});
+
+function windowGapMap(): DoorsMap {
+  return {
+    ...testMap([
+      { id: "w1", a: { x: -4, z: 0 }, b: { x: 4, z: 0 } },
+    ]),
+    windows: [{ id: "win", wallId: "w1", center: { x: 0, z: 0 } }],
+  };
+}
+
+Deno.test("a window gap lets an eye-height shot through and stops a standing body", () => {
+  assertEquals(STAND_EYE_HEIGHT > WINDOW_SILL_Y, true);
+  assertEquals(STAND_EYE_HEIGHT < WINDOW_HEAD_Y, true);
+  const col = new MapCollision(windowGapMap());
+  const through = { x: 0, y: 0, z: 1 };
+  assertEquals(
+    col.raycastSolid({ x: 0, y: STAND_EYE_HEIGHT, z: -2 }, through, 6),
+    null,
+  );
+  assertEquals(
+    col.raycastFullSolid({ x: 0, y: STAND_EYE_HEIGHT, z: -2 }, through, 6),
+    null,
+  );
+  const sill = col.raycastSolid({ x: 0, y: WINDOW_SILL_Y / 2, z: -2 }, through, 6);
+  assertExists(sill);
+  assertEquals(sill! < 3, true);
+  assertEquals(
+    col.raycastFullSolid({ x: 0, y: WINDOW_SILL_Y / 2, z: -2 }, through, 6),
+    null,
+  );
+  const pier = col.raycastSolid(
+    { x: 3, y: STAND_EYE_HEIGHT, z: -2 },
+    through,
+    6,
+  );
+  assertExists(pier);
+  assertEquals(pier! < 3, true);
+
+  const standing = col.resolvePosition(
+    0,
+    0,
+    PLAYER_RADIUS,
+    0,
+    STAND_COLLISION_HEIGHT,
+  );
+  assertEquals(Math.abs(standing.z) > PLAYER_RADIUS, true);
+  const raised = col.resolvePosition(
+    0,
+    0,
+    PLAYER_RADIUS,
+    WINDOW_SILL_Y,
+    WINDOW_SILL_Y + CROUCH_COLLISION_HEIGHT,
+  );
+  assertEquals(raised.x, 0);
+  assertEquals(raised.z, 0);
 });

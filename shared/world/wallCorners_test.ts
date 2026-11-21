@@ -2,10 +2,13 @@ import {
   assertEquals,
   assertAlmostEquals,
 } from "jsr:@std/assert@1";
+import { findClosedWallPolygons } from "./wallPolygons.ts";
 import {
   WALL_CORNER_OFFSET,
   computeDoorYawDots,
   computeWallCorners,
+  doorLineSegment,
+  mapClosureGaps,
   resolveWallCorners,
 } from "./wallCorners.ts";
 
@@ -233,6 +236,76 @@ Deno.test("resolveWallCorners: appends door poles when doors provided", () => {
   const all = resolveWallCorners([], stored, bounds, doors);
   assertEquals(all.length, 1 + 6);
   assertEquals(all.some((p) => p.x === 1 && p.z === 2), true);
+});
+
+Deno.test("opening gaps keep the yaw graph, but a windowed room is not solid", () => {
+  const walls = [
+    { a: { x: 0, z: 0 }, b: { x: 6, z: 0 }, kind: "full" as const },
+    { a: { x: 6, z: 0 }, b: { x: 6, z: 6 }, kind: "full" as const },
+    { a: { x: 6, z: 6 }, b: { x: 0, z: 6 }, kind: "full" as const },
+    { a: { x: 0, z: 6 }, b: { x: 0, z: 0 }, kind: "full" as const },
+    { a: { x: 3, z: 0 }, b: { x: 3, z: 2 }, kind: "full" as const },
+  ];
+  const gap = [{ a: { x: 2.25, z: 6 }, b: { x: 3.75, z: 6 } }];
+  const closed = computeWallCorners(walls);
+  const open = computeWallCorners(walls, null, gap);
+  assertEquals(hasNear(closed, 3, 2 + OFFSET), false);
+  assertEquals(hasNear(open, 3, 2 + OFFSET), true);
+  assertEquals(hasNear(open, 3, 6, 0.05), false);
+});
+
+Deno.test("mapClosureGaps: windows, sliding doors, and energy doors", () => {
+  const bounds = { minX: -20, maxX: 20, minZ: -20, maxZ: 20 };
+  const walls = [
+    { id: "s", a: { x: -4, z: 0 }, b: { x: 4, z: 0 }, kind: "full" as const },
+    { id: "h", a: { x: 0, z: 2 }, b: { x: 4, z: 2 }, kind: "half" as const },
+  ];
+  const windows = [{ wallId: "s", center: { x: -2, z: 0 } }];
+  const doors = [{ wallId: "s", center: { x: 2, z: 0 } }];
+  const teamA = { edge: "south" as const, doorHalfWidth: 2.5 };
+  const teamB = { edge: "north" as const, doorHalfWidth: 2.5 };
+  const gaps = mapClosureGaps({ walls, windows, doors, bounds, teamA, teamB });
+  assertEquals(gaps.length, 4);
+  const south = doorLineSegment(bounds, teamA);
+  const north = doorLineSegment(bounds, teamB);
+  assertEquals(gaps[2]!.a, south[0]);
+  assertEquals(gaps[2]!.b, south[1]);
+  assertEquals(gaps[3]!.a, north[0]);
+  assertEquals(gaps[3]!.b, north[1]);
+
+  const zombots = mapClosureGaps({
+    walls,
+    windows,
+    doors,
+    bounds,
+    teamA,
+    teamB,
+    mirrorMode: "zombots",
+  });
+  assertEquals(zombots.length, 2);
+});
+
+Deno.test("a room across the energy door is not a closure; zombots seals it", () => {
+  const bounds = { minX: -20, maxX: 20, minZ: -20, maxZ: 20 };
+  const walls = [
+    { id: "n", a: { x: -20, z: -10 }, b: { x: 20, z: -10 }, kind: "full" as const },
+  ];
+  const base = {
+    walls,
+    bounds,
+    teamA: { edge: "south" as const, doorHalfWidth: 2.5 },
+    teamB: { edge: "north" as const, doorHalfWidth: 2.5 },
+  };
+  assertEquals(
+    findClosedWallPolygons(walls, bounds, mapClosureGaps(base)).length,
+    0,
+  );
+  const sealed = findClosedWallPolygons(
+    walls,
+    bounds,
+    mapClosureGaps({ ...base, mirrorMode: "zombots" }),
+  );
+  assertEquals(sealed.length, 1);
 });
 
 Deno.test("bounds: pure map corners without interior walls emit nothing", () => {

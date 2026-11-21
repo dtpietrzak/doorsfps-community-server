@@ -95,7 +95,7 @@ Deno.test("shotgun PR8: crosshair mult grows from cone + still", () => {
   assertEquals(crosshairSpreadMultFromDeg(WEAPON_SHOTGUN, 1.2), 1);
   assertAlmostEquals(
     crosshairSpreadMultFromDeg(WEAPON_SHOTGUN, 2.2),
-    (4.5 + 2.2 + 1) / (4.5 + 1.2 + 1),
+    (5.625 + 2.2 + 1) / (5.625 + 1.2 + 1),
   );
   assertEquals(crosshairSpreadMultFromDeg(WEAPON_SHOTGUN, 0), 1);
   assertEquals(crosshairSpreadMultFromDeg(WEAPON_RIFLE, 0), 1);

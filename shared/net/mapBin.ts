@@ -1,4 +1,5 @@
 import { ByteReader, ByteWriter } from "./bytes.ts";
+import { SLIDING_DOOR_COST } from "../world/slidingDoors.ts";
 
 type Vec2 = { x: number; z: number };
 
@@ -48,6 +49,13 @@ export type WireDoorsMap = {
   walls: Array<{ id: string; a: Vec2; b: Vec2; kind?: WallKind }>;
   wallCorners?: Vec2[];
   botHints?: BotHint[];
+  windows?: Array<{ id: string; wallId: string; center: Vec2 }>;
+  /** Sliding doors. Omitted when the map has none. */
+  doors?: Array<{ id: string; wallId: string; center: Vec2; cost?: number }>;
+  /** Present only for a zombots map. Other mirror modes are not on the wire. */
+  mirrorMode?: "zombots";
+  /** Zombots spawn pad. Written with the zombots flag, including 0. */
+  spawnCorner?: CornerId;
 };
 
 const EDGE: EdgeId[] = ["south", "east", "north", "west"];
@@ -162,12 +170,28 @@ function readHint(r: ByteReader): BotHint {
 const MAP_HAS_DESC = 1;
 const MAP_HAS_CORNERS = 2;
 const MAP_HAS_HINTS = 4;
+const MAP_HAS_WINDOWS = 8;
+const MAP_HAS_DOORS = 16;
+const MAP_HAS_ZOMBOTS = 32;
+
+function doorCostU16(cost: number | undefined): number {
+  const value = cost ?? SLIDING_DOOR_COST;
+  if (!Number.isFinite(value)) return SLIDING_DOOR_COST;
+  return Math.max(0, Math.min(65535, Math.round(value)));
+}
+
+function cornerId(value: number): CornerId {
+  return value === 1 || value === 2 || value === 3 ? value : 0;
+}
 
 export function writeMap(w: ByteWriter, map: WireDoorsMap): void {
   let flags = 0;
   if (map.description) flags |= MAP_HAS_DESC;
   if (map.wallCorners && map.wallCorners.length > 0) flags |= MAP_HAS_CORNERS;
   if (map.botHints && map.botHints.length > 0) flags |= MAP_HAS_HINTS;
+  if (map.windows && map.windows.length > 0) flags |= MAP_HAS_WINDOWS;
+  if (map.doors && map.doors.length > 0) flags |= MAP_HAS_DOORS;
+  if (map.mirrorMode === "zombots") flags |= MAP_HAS_ZOMBOTS;
   w.u8(flags);
   w.u8(map.version === 1 ? 1 : 1);
   w.str8(map.name);
@@ -197,6 +221,26 @@ export function writeMap(w: ByteWriter, map: WireDoorsMap): void {
     w.u16(Math.min(65535, hints.length));
     for (const h of hints) writeHint(w, h);
   }
+  if (flags & MAP_HAS_WINDOWS) {
+    const windows = map.windows ?? [];
+    w.u16(Math.min(65535, windows.length));
+    for (const win of windows) {
+      w.str8(win.id);
+      w.str8(win.wallId);
+      writeVec2(w, win.center);
+    }
+  }
+  if (flags & MAP_HAS_DOORS) {
+    const doors = map.doors ?? [];
+    w.u16(Math.min(65535, doors.length));
+    for (const door of doors) {
+      w.str8(door.id);
+      w.str8(door.wallId);
+      writeVec2(w, door.center);
+      w.u16(doorCostU16(door.cost));
+    }
+  }
+  if (flags & MAP_HAS_ZOMBOTS) w.u8(cornerId(map.spawnCorner ?? 0));
 }
 
 export function readMap(r: ByteReader): WireDoorsMap {
@@ -234,6 +278,14 @@ export function readMap(r: ByteReader): WireDoorsMap {
     botHints = [];
     for (let i = 0; i < n; i++) botHints.push(readHint(r));
   }
+  let windows: WireDoorsMap["windows"];
+  if (flags & MAP_HAS_WINDOWS) {
+    const n = r.u16();
+    windows = [];
+    for (let i = 0; i < n; i++) {
+      windows.push({ id: r.str8(), wallId: r.str8(), center: readVec2(r) });
+    }
+  }
   const map: WireDoorsMap = {
     version: 1,
     name,
@@ -246,5 +298,24 @@ export function readMap(r: ByteReader): WireDoorsMap {
   if (description) map.description = description;
   if (wallCorners) map.wallCorners = wallCorners;
   if (botHints) map.botHints = botHints;
+  if (windows && windows.length > 0) map.windows = windows;
+  if (flags & MAP_HAS_DOORS) {
+    const n = r.u16();
+    const doors: NonNullable<WireDoorsMap["doors"]> = [];
+    for (let i = 0; i < n; i++) {
+      const id = r.str8();
+      const wallId = r.str8();
+      const center = readVec2(r);
+      const cost = r.u16();
+      doors.push(
+        cost === SLIDING_DOOR_COST ? { id, wallId, center } : { id, wallId, center, cost },
+      );
+    }
+    if (doors.length > 0) map.doors = doors;
+  }
+  if (flags & MAP_HAS_ZOMBOTS) {
+    map.mirrorMode = "zombots";
+    map.spawnCorner = cornerId(r.u8());
+  }
   return map;
 }
