@@ -127,6 +127,8 @@ export type BotAction = {
   lookSamples?: BotLookSample[];
   /** Request a shot this tick (server validates via canShoot). */
   shoot?: boolean;
+  /** Request one melee swing this tick (zombots zombies; server validates like a human's Melee). */
+  melee?: boolean;
   /** Request a reload this tick (server validates). */
   reload?: boolean;
   /** Equip this weapon id this tick (server validates via handleWeaponSwitch). */

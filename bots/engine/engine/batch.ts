@@ -3,7 +3,8 @@ import {
   resolveBrainHooks,
   type BrainHooks,
 } from "../hooks.ts";
-import { BotBrain } from "../pipeline/brain.ts";
+import { createBotBrain } from "../pipeline/brain.ts";
+import type { BotBrain } from "../types.ts";
 import {
   emptyBotBrainState,
   UNSET,
@@ -25,7 +26,13 @@ import { runtimePlayer } from "../runtime/player.ts";
 import type { Player } from "../players/Player.ts";
 import { runtimeMap } from "../runtime/map.ts";
 import type { DoorsMap } from "../shared/map.ts";
+import { computeWallCorners, mapClosureGaps } from "../../../shared/world/wallCorners.ts";
 import { MapCollision } from "../world/MapCollision.ts";
+import {
+  buildZombieWindowNav,
+  openZombieNavDoors,
+  type ZombieWindowNav,
+} from "../thoughts/zombie/window.ts";
 
 type PipelineSlot = {
   id: string;
@@ -61,7 +68,8 @@ function createSlot(
     initialRandomState,
     random,
     state: emptyBotBrainState(),
-    brain: new BotBrain(configFor(definition, hooks), { rng, hooks }),
+    // createBotBrain picks ZombieBrain when the config says `zombie`.
+    brain: createBotBrain(configFor(definition, hooks), { rng, hooks }),
   };
 }
 
@@ -83,6 +91,7 @@ function wireAction(action: ReadyAction | null): WireReadyAction | null {
     input: WireReadyAction["input"];
     lookSamples?: Array<{ yaw: number; pitch: number }>;
     shoot?: boolean;
+    melee?: boolean;
     reload?: boolean;
     weapon?: number;
     ability?: string;
@@ -97,6 +106,8 @@ function wireAction(action: ReadyAction | null): WireReadyAction | null {
     wired.lookSamples = look;
   }
   if (action.shoot === true) wired.shoot = true;
+  // A swing rides with its input on the wire, so drop it when input is null.
+  if (action.melee === true && input !== null) wired.melee = true;
   if (action.reload === true) wired.reload = true;
   const weapon = action.weapon;
   if (typeof weapon === "number" && Number.isFinite(weapon)) {
@@ -114,12 +125,56 @@ export type BotThinkEngineOptions = {
   hooks?: Partial<BrainHooks>;
 };
 
+/**
+ * The live map plus the open-door list yaw poles read when stored corners
+ * are empty. The field is absent until a frame names the set.
+ */
+type NavMap = DoorsMap & {
+  openSlidingDoorIds?: readonly string[];
+};
+
+function asNavMap(map: DoorsMap): NavMap {
+  return map;
+}
+
+/** First-seen order, so a repeated id does not open twice or reshuffle nav. */
+function uniqueDoorIds(ids: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i]!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
+/** Set identity. Length prefix keeps "no doors" distinct from an empty id. */
+function slidingDoorSetKey(ids: readonly string[]): string {
+  const sorted = uniqueDoorIds(ids);
+  sorted.sort();
+  let key = `${sorted.length}`;
+  for (let i = 0; i < sorted.length; i++) {
+    key += "\0";
+    key += sorted[i]!;
+  }
+  return key;
+}
+
 /** Persistent, runtime-neutral owner of every bot's full thought pipeline. */
 export class PersistentBotThinkEngine {
   private slots: PipelineSlot[] = [];
   private mapDefinition: BotMapDefinition | null = null;
   private map: DoorsMap | null = null;
   private collision: MapCollision | null = null;
+  /** Zombots floor nav, built once per map load (about 20 ms). */
+  private zombieWindows: ZombieWindowNav | null = null;
+  /**
+   * Open-set key baked into `map.wallCorners`. Null means the load-time
+   * corners (authored, or every sliding door a gap). Reset on a new map.
+   */
+  private navOpenKey: string | null = null;
   private readonly hooks: BrainHooks;
 
   constructor(options?: BotThinkEngineOptions) {
@@ -131,7 +186,17 @@ export class PersistentBotThinkEngine {
     const map = runtimeMap(definition);
     this.mapDefinition = definition;
     this.map = map;
-    this.collision = new MapCollision(map);
+    // Only zombies move on a zombots map, so its copy climbs windows.
+    const zombots = map.mirrorMode === "zombots";
+    this.collision = new MapCollision(
+      map,
+      zombots ? { windowBody: "zombie" } : undefined,
+    );
+    this.zombieWindows = zombots
+      ? buildZombieWindowNav(map, this.collision)
+      : null;
+    // A new collision is sealed again. Corners go back to the load-time cache.
+    this.navOpenKey = null;
   }
 
   private findSlot(id: string): PipelineSlot | null {
@@ -221,6 +286,9 @@ export class PersistentBotThinkEngine {
     const validMap = map !== null && collision !== null &&
       this.mapDefinition?.revision === frame.mapRevision;
     if (collision !== null) collision.doorWalkInEnabled = frame.doorsOpen;
+    if (validMap && map !== null && collision !== null) {
+      this.applyOpenSlidingDoors(frame, map, collision);
+    }
 
     const requestedBots = input.bots;
     for (let b = 0; b < requestedBots.length; b++) {
@@ -247,6 +315,7 @@ export class PersistentBotThinkEngine {
           teamScores: { A: frame.teamScoreA, B: frame.teamScoreB },
           humanHeatByPole: frame.humanHeatByPole,
           matchOver: frame.matchOver === true,
+          zombieWindows: this.zombieWindows,
         }, slot.state));
       }
       decisions.push({
@@ -262,6 +331,48 @@ export class PersistentBotThinkEngine {
       mapRevision: frame.mapRevision,
       decisions,
     };
+  }
+
+  /**
+   * Absent list: arenas. Do not open anything and do not rebuild corners.
+   * Present list: the whole open set. Collision drops those blocks once;
+   * corners rebuild only when the set changes, because that walk is the
+   * costly part and a door opens once per match.
+   */
+  private applyOpenSlidingDoors(
+    frame: ThinkFrame,
+    map: DoorsMap,
+    collision: MapCollision,
+  ): void {
+    const ids = frame.openSlidingDoorIds;
+    if (ids === undefined) return;
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i]!;
+      if (!collision.isSlidingDoorOpen(id)) collision.openSlidingDoor(id);
+    }
+    if (this.zombieWindows !== null) {
+      openZombieNavDoors(this.zombieWindows, ids, collision);
+    }
+    const openIds = uniqueDoorIds(ids);
+    const key = slidingDoorSetKey(openIds);
+    if (key === this.navOpenKey) return;
+    this.navOpenKey = key;
+    const nav = asNavMap(map);
+    nav.openSlidingDoorIds = openIds;
+    nav.wallCorners = computeWallCorners(
+      map.walls,
+      map.bounds,
+      mapClosureGaps({
+        walls: map.walls,
+        windows: map.windows,
+        doors: map.doors,
+        openDoorIds: openIds,
+        bounds: map.bounds,
+        mirrorMode: map.mirrorMode,
+        teamA: map.teamA,
+        teamB: map.teamB,
+      }),
+    );
   }
 
   think(frame: ThinkFrame): readonly BotDecision[] {

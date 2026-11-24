@@ -9,7 +9,7 @@ import { captureCheckpointState } from "../replay/authoritativeCheckpoint.ts";
 import { hashAuthoritativeCheckpoint } from "../replay/replayStateHash.ts";
 import type { DoorsMap, Wall } from "../world/map.ts";
 import { MapCollision } from "../world/MapCollision.ts";
-import { Player } from "./Player.ts";
+import { INPUT_QUEUE_MAX_DEPTH, Player } from "./Player.ts";
 import { PlayerManager } from "./PlayerManager.ts";
 import {
   classifyTickAssociation,
@@ -455,4 +455,96 @@ Deno.test("input gap p95 ignores a stale packet", () => {
   assertEquals(p.inAccepted, 3);
   assertEquals(p.inOverwritten, 2);
   assertEquals(p.inputGapP95Ms(), 200);
+});
+
+function bundle(frames: PlayerInput[]): PlayerInput {
+  return { ...frames[frames.length - 1]!, frames };
+}
+
+Deno.test("bundled 60 Hz queue: consumes 1 command per tick in FIFO order with per-tick yaw", () => {
+  const { p, collision } = groundedPlayer();
+  const f1 = input(1, { forward: true, yaw: 0.25, pitch: 0.05 });
+  const f2 = input(2, { forward: true, right: true, yaw: 0.75, pitch: -0.05 });
+  const f3 = input(3, { left: true, jump: true, yaw: 1.25, pitch: 0.1 });
+  p.queueInput(bundle([f1, f2, f3]), 100);
+
+  p.update(collision, 1);
+  assertEquals(p.lastTickInputSelection()?.association, "fresh");
+  assertEquals(p.lastTickInputSelection()?.appliedSequence, 1);
+  assertEquals(p.lastTickInputSelection()?.inputHoldTicks, 1);
+  assertAlmostEquals(p.yaw, 0.25, 1e-9);
+
+  p.update(collision, 2);
+  assertEquals(p.lastTickInputSelection()?.association, "fresh");
+  assertEquals(p.lastTickInputSelection()?.appliedSequence, 2);
+  assertEquals(p.lastTickInputSelection()?.inputHoldTicks, 1);
+  assertAlmostEquals(p.yaw, 0.75, 1e-9);
+
+  p.update(collision, 3);
+  assertEquals(p.lastTickInputSelection()?.association, "fresh");
+  assertEquals(p.lastTickInputSelection()?.appliedSequence, 3);
+  assertEquals(p.lastTickInputSelection()?.inputHoldTicks, 1);
+  assertAlmostEquals(p.yaw, 1.25, 1e-9);
+  assertEquals(p.onGround, false);
+});
+
+Deno.test("bundled 60 Hz queue: deduplicates overlapping/out-of-order frames without overwrite penalty", () => {
+  const { p, collision } = groundedPlayer();
+  p.queueInput(bundle([
+    input(1, { forward: true }),
+    input(2, { forward: true }),
+    input(3, { forward: true }),
+  ]), 100);
+  p.update(collision, 1); // pops seq 1
+  assertEquals(p.lastTickInputSelection()?.appliedSequence, 1);
+
+  // Next bundle resends seq 1, 2, 3 (redundant tail) + new seq 4, 5.
+  p.queueInput(bundle([
+    input(1, { backward: true }), // already seen — must be ignored
+    input(2, { backward: true }), // already queued — must be ignored
+    input(3, { backward: true }), // already queued — must be ignored
+    input(4, { left: true }),
+    input(5, { right: true }),
+  ]), 150);
+  assertEquals(p.inOverwritten, 0);
+
+  const seqs: number[] = [];
+  for (let t = 2; t <= 5; t++) {
+    p.update(collision, t);
+    seqs.push(p.lastTickInputSelection()!.appliedSequence);
+  }
+  assertEquals(seqs, [2, 3, 4, 5]);
+});
+
+Deno.test("bundled 60 Hz queue: caps depth at INPUT_QUEUE_MAX_DEPTH against burst exploits", () => {
+  const { p, collision } = groundedPlayer();
+  const total = INPUT_QUEUE_MAX_DEPTH + 4;
+  const frames = Array.from({ length: total }, (_, i) =>
+    input(i + 1, { forward: true })
+  );
+  p.queueInput(bundle(frames), 100);
+  assertEquals(p.inOverwritten, 4);
+
+  // Oldest 4 dropped → first popped sequence is 5.
+  p.update(collision, 1);
+  assertEquals(p.lastTickInputSelection()?.appliedSequence, 5);
+});
+
+Deno.test("bundled 60 Hz queue: starvation repeats held movement with edges cleared", () => {
+  const { p, collision } = groundedPlayer();
+  p.queueInput(bundle([
+    input(1, { forward: true, jump: true }),
+  ]), 100);
+  p.update(collision, 1);
+  assertEquals(p.onGround, false);
+  const z1 = p.z;
+
+  // Starve for 2 ticks: must repeat forward motion as repeat_missing with jump cleared.
+  p.update(collision, 2);
+  const sel = p.lastTickInputSelection();
+  assertEquals(sel?.association, "repeat_missing");
+  assertEquals(sel?.appliedSequence, 1);
+  assertEquals(sel?.inputHoldTicks, 2);
+  assertEquals(sel?.selectedInput?.jump, false);
+  assertEquals(p.z > z1, true);
 });

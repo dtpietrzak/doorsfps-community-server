@@ -82,6 +82,10 @@ export type SessionEventHost = {
   adminCommandHost: () => AdminCommandHost;
   raid: () => RaidMatch | null;
   raidLoadedPlayerIds: () => Set<string>;
+  /** Zombots load gate. A no-op on every other runtime. */
+  zombotsMapLoaded: (playerId: string) => void;
+  /** Zombots E / right click. A no-op on every other runtime. */
+  zombotsInteract: (playerId: string, raw: unknown) => void;
   handleMatchReady: (playerId: string, ready: boolean) => void;
   dropPlayer: (playerId: string) => void;
 };
@@ -377,8 +381,17 @@ function bindPlayerHandlers(
   // Raid start gate: this client finished building the map.
   session.on(NetEvents.MapLoaded, () => {
     const id = playerIdFor();
-    if (!id || !host.raid() || host.raid()!.started) return;
+    if (!id) return;
+    host.zombotsMapLoaded(id);
+    if (!host.raid() || host.raid()!.started) return;
     host.raidLoadedPlayerIds().add(id);
+  });
+
+  // Zombots: queued for the next tick's rules step, like a shot.
+  session.on(NetEvents.Interact, (raw: unknown) => {
+    const id = playerIdFor();
+    if (!id) return;
+    host.zombotsInteract(id, raw);
   });
 
   // Ranked pre-match ready vote (distinct from NetEvents.Ready re-sync).

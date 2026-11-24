@@ -60,6 +60,7 @@ export interface AuthoritativeEventBuffer {
  */
 export const SIM_TICK_EVENT_DISPOSITION = {
   CombatBurst: "record-as",
+  Zombots: "record-as",
   PlayerDied: "record-as",
   Score: "record-as",
   /** Presentation of matchEnd/matchDraw when both exist; else record-as. */
@@ -215,6 +216,8 @@ export function mapSimTickEventToAuthoritative(
       return mapGameOver(tick, event.gameOver);
     case "PlayerRespawned":
       return mapPlayerRespawned(tick, event.player);
+    case "Zombots":
+      return { kind: "zombots", appliedTick: tick, ...event.fact };
   }
 }
 

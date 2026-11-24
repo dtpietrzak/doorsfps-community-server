@@ -10,5 +10,6 @@ export {
   COMMUNITY_BOT_CONFIG,
   RAID_BOT_CONFIG,
   RAID_NO_STOPS_BOT_CONFIG,
+  ZOMBIE_BOT_CONFIG,
   agentBrainConfigFor,
 } from "@doors/bot-spec/config";

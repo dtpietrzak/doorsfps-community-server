@@ -72,6 +72,7 @@ const RULES: Readonly<Record<string, FileRules>> = {
       getPrematchState: "prematch ready votes",
       sampleParticipation: "participation metering",
       getMatchParticipation: "participation metering",
+      setZombotsRules: "zombots configure-time roster policy (humans go down)",
     },
     expectedSimOffenders: {},
     raidBotReads: {

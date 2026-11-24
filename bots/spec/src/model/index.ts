@@ -158,6 +158,11 @@ export type PlayerSnapshot = Readonly<{
   weapons?: readonly WeaponInventorySnapshot[];
   /** Pre-resolved Glitch visibility for this immutable frame. */
   glitchState?: "hidden" | "revealed" | "inactive";
+  /**
+   * Zombots: a human at 0 HP waiting for a revive (`alive` is false). Omitted
+   * means standing, and in every other mode.
+   */
+  isDowned?: boolean;
   weapon: WeaponSnapshot;
   skills: readonly SkillSnapshot[];
 }>;
@@ -215,6 +220,8 @@ export type ReadyAction = Readonly<{
    */
   lookSamples?: readonly BotLookSample[];
   shoot?: boolean;
+  /** One melee swing (zombots zombies). Only present with a non-null input. */
+  melee?: boolean;
   reload?: boolean;
   weapon?: number;
   ability?: string;
@@ -259,6 +266,13 @@ export type ThinkFrame = Readonly<{
   mapRevision: string;
   doorsOpen: boolean;
   doorChangeTick: number | null;
+  /**
+   * Sliding doors the match has opened, the full set each frame.
+   * Absent: the engine leaves collision and nav as loaded, and every
+   * sliding door stays a nav gap (arenas). Present, including `[]`:
+   * that is the open set, and every other sliding door is solid wall.
+   */
+  openSlidingDoorIds?: readonly string[];
   teamScoreA: number;
   teamScoreB: number;
   players: readonly PlayerSnapshot[];

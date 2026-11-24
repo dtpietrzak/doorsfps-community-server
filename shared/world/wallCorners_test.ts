@@ -317,3 +317,177 @@ Deno.test("bounds: pure map corners without interior walls emit nothing", () => 
   });
   assertEquals(corners.length, 0);
 });
+
+Deno.test("a closed sliding door is solid; opening it is a gap", () => {
+  const bounds = { minX: -20, maxX: 20, minZ: -20, maxZ: 20 };
+  const walls = [
+    { id: "s", a: { x: 0, z: 0 }, b: { x: 6, z: 0 }, kind: "full" as const },
+    { id: "e", a: { x: 6, z: 0 }, b: { x: 6, z: 6 }, kind: "full" as const },
+    { id: "n", a: { x: 6, z: 6 }, b: { x: 0, z: 6 }, kind: "full" as const },
+    { id: "w", a: { x: 0, z: 6 }, b: { x: 0, z: 0 }, kind: "full" as const },
+    { id: "stub", a: { x: 3, z: 0 }, b: { x: 3, z: 2 }, kind: "full" as const },
+  ];
+  const doors = [{ id: "d", wallId: "n", center: { x: 3, z: 6 } }];
+  const base = { walls, doors, bounds, mirrorMode: "zombots" };
+  const allOpen = mapClosureGaps(base);
+  const namedOpen = mapClosureGaps({ ...base, openDoorIds: ["d"] });
+  const sealed = mapClosureGaps({ ...base, openDoorIds: [] });
+  assertEquals(namedOpen, allOpen);
+  assertEquals(sealed, []);
+  assertEquals(allOpen.length, 1);
+
+  const closedCorners = computeWallCorners(walls, bounds, sealed);
+  const openCorners = computeWallCorners(walls, bounds, allOpen);
+  assertEquals(hasNear(closedCorners, 3, 2 + OFFSET), false);
+  assertEquals(hasNear(openCorners, 3, 2 + OFFSET), true);
+
+  const withWindow = mapClosureGaps({
+    walls,
+    windows: [{ wallId: "s", center: { x: 1, z: 0 } }],
+    doors,
+    bounds,
+    teamA: { edge: "south", doorHalfWidth: 2.5 },
+    teamB: { edge: "north", doorHalfWidth: 2.5 },
+    openDoorIds: [],
+  });
+  // Window stays, both energy doors stay, the sliding door does not.
+  assertEquals(withWindow.length, 3);
+});
+
+Deno.test("corner recompute stays cheap on a map with many doors", async () => {
+  const rooms = 48;
+  const span = 6;
+  const walls: {
+    id: string;
+    a: { x: number; z: number };
+    b: { x: number; z: number };
+    kind: "full";
+  }[] = [
+    { id: "south", a: { x: 0, z: 0 }, b: { x: rooms * span, z: 0 }, kind: "full" },
+    { id: "north", a: { x: 0, z: span }, b: { x: rooms * span, z: span }, kind: "full" },
+  ];
+  const doors: { id: string; wallId: string; center: { x: number; z: number } }[] = [];
+  for (let i = 0; i <= rooms; i++) {
+    walls.push({
+      id: `v${i}`,
+      a: { x: i * span, z: 0 },
+      b: { x: i * span, z: span },
+      kind: "full",
+    });
+    if (i < rooms) {
+      doors.push({
+        id: `d${i}`,
+        wallId: `v${i}`,
+        center: { x: i * span, z: span / 2 },
+      });
+    }
+  }
+  const bounds = {
+    minX: -5,
+    maxX: rooms * span + 5,
+    minZ: -5,
+    maxZ: span + 5,
+  };
+  const once = (openDoorIds: readonly string[]) =>
+    computeWallCorners(
+      walls,
+      bounds,
+      mapClosureGaps({ walls, doors, bounds, mirrorMode: "zombots", openDoorIds }),
+    );
+  const gapCount = (openDoorIds: readonly string[]) =>
+    mapClosureGaps({
+      walls,
+      doors,
+      bounds,
+      mirrorMode: "zombots",
+      openDoorIds,
+    }).length;
+  const allIds = doors.map((door) => door.id);
+  assertEquals(gapCount([]), 0);
+  assertEquals(gapCount(["d0"]), 1);
+  assertEquals(gapCount(allIds), doors.length);
+  once([]);
+  const t0 = performance.now();
+  once([]);
+  once(allIds);
+  once(["d0"]);
+  const ms = performance.now() - t0;
+  // One door-open rebuilds corners once. This is that walk, three times.
+  assertEquals(
+    ms < 250,
+    true,
+    `recompute ${doors.length} doors took ${ms.toFixed(2)} ms`,
+  );
+
+  let fullest: { name: string; walls: typeof walls } | null = null;
+  const dir = new URL("../../maps/competitive/", import.meta.url);
+  for await (const entry of Deno.readDir(dir)) {
+    if (!entry.name.endsWith(".doors.json")) continue;
+    const raw = JSON.parse(await Deno.readTextFile(new URL(entry.name, dir))) as {
+      name?: string;
+      walls?: {
+        id: string;
+        a: { x: number; z: number };
+        b: { x: number; z: number };
+        kind?: string;
+      }[];
+      bounds?: typeof bounds;
+      teamA?: { edge: "south" | "east" | "north" | "west"; doorHalfWidth: number };
+      teamB?: { edge: "south" | "east" | "north" | "west"; doorHalfWidth: number };
+    };
+    const full = (raw.walls ?? []).filter((wall) =>
+      wall.kind !== "half" && wall.kind !== "float"
+    );
+    if (fullest === null || full.length > fullest.walls.length) {
+      fullest = {
+        name: raw.name ?? entry.name,
+        walls: full.map((wall) => ({
+          id: wall.id,
+          a: wall.a,
+          b: wall.b,
+          kind: "full" as const,
+        })),
+      };
+    }
+  }
+  if (fullest === null || fullest.walls.length === 0) return;
+  const mapDoors = fullest.walls.map((wall, index) => ({
+    id: `door-${index}`,
+    wallId: wall.id,
+    center: {
+      x: (wall.a.x + wall.b.x) / 2,
+      z: (wall.a.z + wall.b.z) / 2,
+    },
+  }));
+  const mapBounds = { minX: -20, maxX: 20, minZ: -20, maxZ: 20 };
+  const rebuild = (openDoorIds: readonly string[]) =>
+    computeWallCorners(
+      fullest.walls,
+      mapBounds,
+      mapClosureGaps({
+        walls: fullest.walls,
+        doors: mapDoors,
+        bounds: mapBounds,
+        openDoorIds,
+      }),
+    );
+  const liveIds = mapDoors.map((door) => door.id);
+  const liveGaps = (openDoorIds: readonly string[]) =>
+    mapClosureGaps({
+      walls: fullest.walls,
+      doors: mapDoors,
+      bounds: mapBounds,
+      openDoorIds,
+    }).length;
+  assertEquals(liveGaps([]) < liveGaps(liveIds), true);
+  rebuild([]);
+  const live0 = performance.now();
+  rebuild([]);
+  rebuild(liveIds);
+  const liveMs = performance.now() - live0;
+  assertEquals(
+    liveMs < 250,
+    true,
+    `${fullest.name}: recompute ${mapDoors.length} doors took ${liveMs.toFixed(2)} ms`,
+  );
+});

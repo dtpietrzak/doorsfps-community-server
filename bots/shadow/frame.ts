@@ -13,6 +13,8 @@ import { SLIDING_DOOR_COST } from "../../shared/world/slidingDoors.ts";
 const mapRevisions = new WeakMap<MapCollision, string>();
 const mapDefinitions = new WeakMap<MapCollision, BotMapDefinition>();
 
+let zombotsCollisionSerial = 0;
+
 export function stableMapRevision(collision: MapCollision): string {
   const cached = mapRevisions.get(collision);
   if (cached !== undefined) return cached;
@@ -22,9 +24,14 @@ export function stableMapRevision(collision: MapCollision): string {
     hash ^= source.charCodeAt(index);
     hash = Math.imul(hash, 0x01000193);
   }
+  // Zombots doors only ever open inside one collision; a new run builds a
+  // new one. Its own revision makes the engine rebuild with every door shut.
+  const run = collision.map.mirrorMode === "zombots"
+    ? `:run${++zombotsCollisionSerial}`
+    : "";
   const revision = `${collision.map.name}:${collision.map.version}:${
     (hash >>> 0).toString(16).padStart(8, "0")
-  }`;
+  }${run}`;
   mapRevisions.set(collision, revision);
   return revision;
 }
@@ -87,6 +94,8 @@ function snapshotPlayer(
     unlimitedAmmo: player.unlimitedAmmo,
     weapons,
     glitchState: player.glitchSnapState(tick, collision) ?? "inactive",
+    // Zombots only; other modes keep the frame unchanged.
+    ...(player.downed ? { isDowned: true } : {}),
     weapon: {
       id: player.weaponId,
       ammoInMagazine: player.ammoInMag,

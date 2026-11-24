@@ -238,5 +238,6 @@ export function playerFromCheckpointState(
       : {}),
   });
   player.restoreFromCheckpoint(state);
+  if (state.zombots) player.restoreZombotsState(state.zombots);
   return player;
 }

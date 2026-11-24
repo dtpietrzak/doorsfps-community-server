@@ -7,7 +7,13 @@ import {
   wallKind,
 } from "../shared/map.ts";
 import { slidingDoorBlock } from "../../../shared/world/slidingDoors.ts";
-import { authoredWallSpans } from "../../../shared/world/wallWindows.ts";
+import {
+  collisionWallSpans,
+  WINDOW_PART_NONE,
+  WINDOW_PART_PANE,
+  type WindowBody,
+  windowPartPassable,
+} from "../../../shared/world/wallWindows.ts";
 import {
   DOOR_CLOSED_STANDOFF,
   DOOR_POST_WIDTH,
@@ -74,7 +80,14 @@ export const DOOR_CAPTURE_RADIUS = 0.85;
  */
 const DOOR_WALK_IN_NEAR_DEPTH = PLAYER_RADIUS + 0.55;
 
-type Segment = { a: Vec2; b: Vec2; yMin: number; yMax: number };
+type Segment = {
+  a: Vec2;
+  b: Vec2;
+  yMin: number;
+  yMax: number;
+  /** `WINDOW_PART_*` from wallWindows.ts. */
+  windowPart: number;
+};
 type Vec3 = { x: number; y: number; z: number };
 
 export type VerticalRange = { yMin: number; yMax: number };
@@ -138,6 +151,11 @@ export class MapCollision {
   private readonly cellSize = SOLID_GRID_CELL;
   /** Scratch flags for unique segment visits during a query. */
   private visitScratch: boolean[] = [];
+  /** Closed sliding-door blocks, with their door id at the same index. */
+  private readonly doorBlockIds: string[] = [];
+  private readonly doorBlocks: Segment[] = [];
+  /** Sliding doors opened at runtime, in the order they opened. */
+  private readonly openDoors: string[] = [];
   /**
    * When true, resolvePosition allows a short walk-in past the door plane.
    * Keep false while doors are closed so players don't clip into the sealed
@@ -145,19 +163,30 @@ export class MapCollision {
    */
   public doorWalkInEnabled = true;
   private readonly spawnRng = createRandom(0x9e3779b9);
+  /**
+   * Zombots zombie window rule (step 12c): sills climbable, header and pane
+   * ignored. Every pawn on a zombots map is a zombie, so the engine builds
+   * its copy with `windowBody: "zombie"` there. Same rule as the server's
+   * `bodyCollision("zombie")`.
+   */
+  private readonly zombieClimb: boolean;
 
-  constructor(map: DoorsMap) {
+  constructor(map: DoorsMap, opts?: { windowBody?: WindowBody }) {
     this.map = map;
+    const zombots = map.mirrorMode === "zombots";
+    this.zombieClimb = zombots && opts !== undefined &&
+      opts.windowBody === "zombie";
     const source = map.walls;
     for (let i = 0; i < source.length; i++) {
       const w = source[i]!;
       const range = verticalRangeForKind(wallKind(w));
-      const spans = authoredWallSpans(
+      const spans = collisionWallSpans(
         w,
         map.windows,
         range.yMin,
         range.yMax,
         map.doors,
+        zombots,
       );
       for (let s = 0; s < spans.length; s++) {
         const span = spans[s]!;
@@ -166,6 +195,7 @@ export class MapCollision {
           b: copyVec2(span.b),
           yMin: span.yMin,
           yMax: span.yMax,
+          windowPart: span.windowPart,
         });
       }
     }
@@ -179,12 +209,16 @@ export class MapCollision {
       if (!wall) continue;
       const block = slidingDoorBlock(wall, door.center);
       if (!block) continue;
-      this.walls.push({
+      const segment: Segment = {
         a: copyVec2(block.a),
         b: copyVec2(block.b),
         yMin: 0,
         yMax: WALL_HEIGHT,
-      });
+        windowPart: WINDOW_PART_NONE,
+      };
+      this.walls.push(segment);
+      this.doorBlockIds.push(door.id);
+      this.doorBlocks.push(segment);
     }
     this.buildPerimeterWithDoorGaps();
     for (let i = 0; i < this.walls.length; i++) this.solids.push(this.walls[i]!);
@@ -194,6 +228,53 @@ export class MapCollision {
     this.buildSolidGrid();
     this.visitScratch = [];
     for (let i = 0; i < this.solids.length; i++) this.visitScratch.push(false);
+  }
+
+  /**
+   * Zombots: drop a closed sliding door's block so movement, hitscan and
+   * line of sight all pass through it. Returns true only when this call
+   * opened it; unknown or already-open ids change nothing. Same contract as
+   * the server copy in `world/MapCollision.ts`.
+   */
+  public openSlidingDoor(doorId: string): boolean {
+    const drop: Segment[] = [];
+    let keep = 0;
+    for (let i = 0; i < this.doorBlocks.length; i++) {
+      const segment = this.doorBlocks[i]!;
+      const id = this.doorBlockIds[i]!;
+      if (id === doorId) {
+        drop.push(segment);
+        continue;
+      }
+      this.doorBlocks[keep] = segment;
+      this.doorBlockIds[keep] = id;
+      keep++;
+    }
+    if (drop.length === 0) return false;
+    this.doorBlocks.length = keep;
+    this.doorBlockIds.length = keep;
+    this.openDoors.push(doorId);
+    removeSegments(this.walls, drop);
+    removeSegments(this.solids, drop);
+    // Indices shift after the removal, so rebuild the grid and scratch.
+    this.buildSolidGrid();
+    this.visitScratch.length = this.solids.length;
+    return true;
+  }
+
+  /** True once {@link openSlidingDoor} has opened this door. */
+  public isSlidingDoorOpen(doorId: string): boolean {
+    for (let i = 0; i < this.openDoors.length; i++) {
+      if (this.openDoors[i] === doorId) return true;
+    }
+    return false;
+  }
+
+  /** Doors opened at runtime, in open order. Replay these to restore. */
+  public openSlidingDoorIds(): readonly string[] {
+    const out: string[] = [];
+    for (let i = 0; i < this.openDoors.length; i++) out.push(this.openDoors[i]!);
+    return out;
   }
 
   /**
@@ -239,6 +320,8 @@ export class MapCollision {
 
     let best: number | null = null;
     const consider = (seg: Segment) => {
+      // Panes only stop human bodies; shots and sight go through windows.
+      if (seg.windowPart === WINDOW_PART_PANE) return;
       if (fullOnly && !isFullWallSegment(seg)) return;
       const t = rayThickSegment(
         origin,
@@ -301,6 +384,7 @@ export class MapCollision {
       pz - pad,
       pz + pad,
       (seg) => {
+        if (windowPartPassable(seg.windowPart, this.zombieClimb)) return;
         if (!bodyOverlapsSlab(feetY, headY, seg.yMin, seg.yMax)) return;
         let ax = seg.a.x;
         let az = seg.a.z;
@@ -646,6 +730,21 @@ function copyVec2(p: Vec2): Vec2 {
   return { x: p.x, z: p.z };
 }
 
+/** Remove `drop` from `list` by identity, keeping the rest in order. */
+function removeSegments(list: Segment[], drop: readonly Segment[]): void {
+  let w = 0;
+  for (let r = 0; r < list.length; r++) {
+    const seg = list[r]!;
+    let dropped = false;
+    for (let d = 0; d < drop.length; d++) {
+      if (drop[d] === seg) dropped = true;
+    }
+    if (dropped) continue;
+    list[w++] = seg;
+  }
+  list.length = w;
+}
+
 /**
  * Local frame for a team door: midpoint, world-aligned along-edge axis,
  * inward normal (toward map center), and half-length of the door segment.
@@ -873,6 +972,7 @@ function addEdgeWithGap(
       b: copyVec2(b),
       yMin: 0,
       yMax: WALL_HEIGHT,
+      windowPart: WINDOW_PART_NONE,
     });
     return;
   }
@@ -900,6 +1000,7 @@ function addEdgeWithGap(
         b: { x: a.x + dx * g.t0, z: a.z + dz * g.t0 },
         yMin: 0,
         yMax: WALL_HEIGHT,
+        windowPart: WINDOW_PART_NONE,
       });
     }
     cursor = g.t1;
@@ -910,6 +1011,7 @@ function addEdgeWithGap(
       b: { x: b.x, z: b.z },
       yMin: 0,
       yMax: WALL_HEIGHT,
+      windowPart: WINDOW_PART_NONE,
     });
   }
 }

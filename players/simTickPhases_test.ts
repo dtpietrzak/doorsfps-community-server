@@ -39,6 +39,7 @@ Deno.test("weapons phases precede MovePhysics; BotThink is last", () => {
 Deno.test("SIM_TICK_EVENT_ORDER matches the pinned emit contract", () => {
   assertEquals([...SIM_TICK_EVENT_ORDER], [
     "CombatBurst",
+    "Zombots",
     "PlayerDied",
     "Score",
     "GameOver",

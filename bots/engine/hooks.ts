@@ -17,6 +17,7 @@ import {
   COMMUNITY_BOT_CONFIG,
   RAID_BOT_CONFIG,
   RAID_NO_STOPS_BOT_CONFIG,
+  ZOMBIE_BOT_CONFIG,
 } from "./config.ts";
 import type { Player } from "./players/Player.ts";
 import type { BotBrainState } from "./pipeline/state.ts";
@@ -147,6 +148,8 @@ export function publicResolveConfig(profile: string): BotBrainConfig {
       return RAID_BOT_CONFIG;
     case "raid-no-stops":
       return RAID_NO_STOPS_BOT_CONFIG;
+    case "zombie":
+      return ZOMBIE_BOT_CONFIG;
     default:
       return COMMUNITY_BOT_CONFIG;
   }

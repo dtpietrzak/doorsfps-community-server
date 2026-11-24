@@ -214,6 +214,8 @@ function recordingHost(over: Partial<SessionEventHost> = {}): {
     adminCommandHost: () => ({}) as AdminCommandHost,
     raid: () => null,
     raidLoadedPlayerIds: () => loaded,
+    zombotsMapLoaded: () => {},
+    zombotsInteract: () => {},
     handleMatchReady: (id, ready) => {
       trace.ready.push({ id, ready });
     },
@@ -447,6 +449,24 @@ Deno.test("map loaded notes the player only before the raid starts", () => {
   started = true;
   joiner.ons.get(NetEvents.MapLoaded)?.();
   assertEquals([...loaded], ["p1"]);
+});
+
+Deno.test("zombots: MapLoaded and Interact reach the host for the seated id", () => {
+  const loads: string[] = [];
+  const interacts: Array<{ id: string; raw: unknown }> = [];
+  const { host } = recordingHost({
+    seatPlayer: () => seated(),
+    zombotsMapLoaded: (id) => loads.push(id),
+    zombotsInteract: (id, raw) => interacts.push({ id, raw }),
+  });
+  const wired = fakeHub();
+  registerSessionEvents(wired.hub, host);
+  const joiner = fakeSession("sock");
+  wired.connect(joiner.session);
+  joiner.ons.get(NetEvents.MapLoaded)?.();
+  joiner.ons.get(NetEvents.Interact)?.({ yaw: 1, pitch: 0 });
+  assertEquals(loads, ["p1"]);
+  assertEquals(interacts, [{ id: "p1", raw: { yaw: 1, pitch: 0 } }]);
 });
 
 Deno.test("a missing roster id refuses a team change", () => {

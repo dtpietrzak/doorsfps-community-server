@@ -154,6 +154,8 @@ export const SIM_TICK_PHASE_IDS: readonly SimTickPhaseId[] = SIM_TICK_PHASES.map
 /** Pinned authoritative event emission order within a tick. */
 export const SIM_TICK_EVENT_ORDER = [
   "CombatBurst",
+  /** Zombots rules facts (door, revive, rack), right after weapons. */
+  "Zombots",
   "PlayerDied",
   "Score",
   "GameOver",

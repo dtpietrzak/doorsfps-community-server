@@ -137,6 +137,43 @@ Deno.test("ingress parse: Input boolean-coerces keys; preserves look numbers", (
   });
 });
 
+Deno.test("ingress parse: Input parses bundled frames, filters bad entries, and caps at 16 newest", () => {
+  const rawFrames = [
+    ...Array.from({ length: 20 }, (_, i) => ({
+      sequence: i + 1,
+      yaw: 0.1 * i,
+      pitch: 0,
+      forward: i % 2 === 0,
+    })),
+  ];
+  const parsed = parsePlayerInput({
+    sequence: 20,
+    yaw: 1.9,
+    pitch: 0,
+    forward: false,
+    frames: rawFrames,
+  });
+  assertEquals(parsed?.frames?.length, 16);
+  // Keeps the newest 16 frames (sequences 5..20).
+  assertEquals(parsed?.frames?.[0]?.sequence, 5);
+  assertEquals(parsed?.frames?.[15]?.sequence, 20);
+
+  const mixed = parsePlayerInput({
+    sequence: 2,
+    yaw: 0,
+    pitch: 0,
+    frames: [
+      { sequence: 1, yaw: 0.2, pitch: 0, forward: true },
+      { sequence: "bad", yaw: 0, pitch: 0 },
+      { sequence: 2, yaw: 0.4, pitch: 0, jump: true },
+    ],
+  });
+  assertEquals(mixed?.frames?.length, 2);
+  assertEquals(mixed?.frames?.[0]?.sequence, 1);
+  assertEquals(mixed?.frames?.[1]?.sequence, 2);
+  assertEquals(mixed?.frames?.[1]?.jump, true);
+});
+
 Deno.test("ingress parse: Shoot drops non-finite aim; keeps origin/ticks", () => {
   assertEquals(parseShootPacket({ yaw: 1, pitch: Infinity }), null);
   const ok = parseShootPacket({

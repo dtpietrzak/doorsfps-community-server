@@ -27,6 +27,7 @@ import {
   type SkillProductId,
 } from "../shared/sim/skills.ts";
 import { rollDamageVariation } from "../shared/sim/game.ts";
+import { ZOMBOTS_TUNING } from "../shared/zombots/zombotsTuning.ts";
 import {
   createMatchSimRngStreams,
   generateMatchSeed,
@@ -170,6 +171,28 @@ export type PlayerManagerOptions = {
    * persisted here.
    */
   matchSeed?: number;
+  /**
+   * Zombots sim rules (notes/zombots.md steps 12a/12b). Omitted = off, and
+   * arenas, ranked and raids never set it, so their sim is unchanged.
+   */
+  zombots?: ZombotsSimRules;
+};
+
+/** Per-match zombots switches. Each defaults off when the object is absent. */
+export type ZombotsSimRules = {
+  /**
+   * Every player (humans and bots) joins with no gun armed. Fire, reload and
+   * switching to an unarmed gun are refused; cycling skips unarmed guns; an
+   * empty-handed player swings a fist (`FIST_MELEE`).
+   */
+  armedWeapons: boolean;
+  /** Humans at 0 HP go downed (no respawn) until `revivePlayer`. Bots die. */
+  downedState: boolean;
+  /**
+   * Shots and swings pass through same-team players: no friendly fire, and
+   * a zombie behind another zombie still reaches the human.
+   */
+  teammatesPassThrough: boolean;
 };
 
 /**
@@ -278,6 +301,8 @@ export class PlayerManager {
    */
   private matchSeed: number;
   private simRng: MatchSimRngStreams;
+  /** Zombots rules, or null in every other mode. */
+  private zombotsRules: ZombotsSimRules | null = null;
   private simRngReseedListener:
     | ((matchSeed: number, streams: MatchSimRngStreams) => void)
     | null = null;
@@ -288,6 +313,7 @@ export class PlayerManager {
     this.matchDurationTicks = Math.max(1, Math.ceil(seconds * TICK_HZ));
     this.matchEndTick = this.matchDurationTicks;
     this.prematchEnabled = options?.enablePrematch === true;
+    this.zombotsRules = options?.zombots ? { ...options.zombots } : null;
     this.inPrematch = this.prematchEnabled;
     // Match seed first so domain-stream closures close over a live simRng.
     this.matchSeed = 0;
@@ -408,12 +434,22 @@ export class PlayerManager {
           : {}),
       });
       player.restoreFromCheckpoint(row);
+      if (row.zombots) player.restoreZombotsState(row.zombots);
       this.players.set(player.id, player);
       if (!player.isBot && player.socketId) {
         this.socketToPlayer.set(player.socketId, player.id);
       }
     }
     this.invalidateRosterCache();
+
+    // Zombots (step 14): the rules flag, then the run's open doors. Doors
+    // only open, and opening is order-free, so a collision that already has
+    // one of these open simply keeps it.
+    const zombots = match.zombots;
+    this.zombotsRules = zombots ? { ...zombots.rules } : null;
+    for (const doorId of zombots?.openDoorIds ?? []) {
+      this.collision.openSlidingDoor(doorId);
+    }
 
     // Tick stamp + buffer / per-tick scratch clear.
     this.simTick = checkpoint.tick;
@@ -1788,6 +1824,7 @@ export class PlayerManager {
       this.simTick,
     );
     player.unlimitedAmmo = this.isPrematch() && PREMATCH_CONFIG.unlimitedAmmo;
+    this.applyZombotsRulesTo(player, true);
     // Mid-match join: only credit time from now until match end.
     if (this.isLive()) {
       player.resetMatchParticipation(nowMs);
@@ -1884,6 +1921,7 @@ export class PlayerManager {
       this.simTick,
     );
     player.unlimitedAmmo = this.isPrematch() && PREMATCH_CONFIG.unlimitedAmmo;
+    this.applyZombotsRulesTo(player, false);
     this.players.set(id, player);
     this.invalidateRosterCache();
     // Record as a normal join — fill-bot identity is not a wire/replay fact.
@@ -1940,6 +1978,7 @@ export class PlayerManager {
     );
     // Agents keep unlimited ammo for the full match (constructor also sets this).
     player.unlimitedAmmo = true;
+    this.applyZombotsRulesTo(player, false);
     this.players.set(id, player);
     this.invalidateRosterCache();
     this.recordAuthoritativeEvent(deriveAgentAdd(this.simTick, player));
@@ -2190,7 +2229,7 @@ export class PlayerManager {
 
     let respawned = false;
     if (
-      !player.alive && this.raidDoorPolicy === "off" &&
+      !player.alive && !player.downed && this.raidDoorPolicy === "off" &&
       this.areDoorsOpen(tick)
     ) {
       player.respawn(this.spawnFor(player.team), tick);
@@ -2457,7 +2496,11 @@ export class PlayerManager {
       fireEffect,
     );
     // Targets are collected once per shot; every pellet tests the same poses.
-    const targetCount = this.collectLagCompTargets(shooterId, rewindTicks);
+    const targetCount = this.collectLagCompTargets(
+      shooterId,
+      rewindTicks,
+      this.passThroughTeamOf(shooter),
+    );
 
     const pellets: ShotPellet[] = [];
     /** Per-victim base damage (post-falloff, pre-roll) summed over pellets. */
@@ -2707,12 +2750,17 @@ export class PlayerManager {
   private collectLagCompTargets(
     excludeId: string,
     rewindTicks: readonly number[],
+    /** Zombots: skip this team's (non-agent) players. Null = skip nobody. */
+    passThroughTeam: TeamId | null = null,
   ): number {
     // Reuse module-level pool to cut per-shot GC (hot path).
     // Count-based so prior slot objects are retained across shots.
     let targetCount = 0;
     for (const p of this.ruleRoster()) {
       if (p.id === excludeId || !p.alive) continue;
+      if (
+        passThroughTeam !== null && !p.isAgent && p.team === passThroughTeam
+      ) continue;
       // Dedup identical poses so multi-sample doesn't inflate work.
       shootSeenScratch.clear();
       for (let ri = 0; ri < rewindTicks.length; ri++) {
@@ -2783,9 +2831,9 @@ export class PlayerManager {
     };
     this.noteActionEffect(fireEffect);
     if (!attacker.canMelee(tick)) return null;
-    // canMelee guarantees the equipped weapon has melee stats.
+    // canMelee guarantees a swing: the equipped gun's melee, or the fist.
     const weapon = attacker.weapon;
-    const melee = weapon.melee!;
+    const melee = attacker.meleeDef!;
     attacker.markMelee(tick);
 
     if (
@@ -2811,7 +2859,11 @@ export class PlayerManager {
       opts,
       fireEffect,
     );
-    const targetCount = this.collectLagCompTargets(attackerId, rewindTicks);
+    const targetCount = this.collectLagCompTargets(
+      attackerId,
+      rewindTicks,
+      this.passThroughTeamOf(attacker),
+    );
 
     // Walls block the swing: clamp to the first solid hit within melee range.
     const wallDist = this.collision.raycastSolid(
@@ -2843,12 +2895,25 @@ export class PlayerManager {
 
     const victim = this.players.get(hit.playerId);
     if (!victim || !victim.alive) return { shot };
+    // Zombie bite: the pistol-whip ray is a couple of meters. A zombie only
+    // connects when its body is on the target. Same planar reach the brain uses.
+    if (attacker.climbsWindows) {
+      const dx = attacker.x - victim.x;
+      const dz = attacker.z - victim.z;
+      const reach = ZOMBOTS_TUNING.zombie.meleeRange;
+      if (dx * dx + dz * dz > reach * reach) {
+        shot.hitId = null;
+        shot.hitZone = null;
+        shot.hitPoint = null;
+        return { shot };
+      }
+    }
     // Spawn protect / Force Field: swing for animation, but no damage outcomes.
     if (victim.isInvulnerable(tick)) return { shot };
 
     // Flat roll off melee.baseDamage — the hit zone only drives feedback.
     const damageRoll = rollDamageVariation(
-      melee.baseDamage,
+      attacker.meleeDamageOverride ?? melee.baseDamage,
       this.damageRandom(),
     );
     let damage = damageRoll.damage;
@@ -2935,6 +3000,120 @@ export class PlayerManager {
     }
 
     return leech ? { shot, damages, leech: true } : { shot, damages };
+  }
+
+  // ── Zombots sim rules (steps 12a / 12b) ──
+
+  /** Active zombots rules, or null when off (every other mode). */
+  public getZombotsRules(): Readonly<ZombotsSimRules> | null {
+    return this.zombotsRules;
+  }
+
+  /**
+   * Turn zombots rules on (or off with null) after construction. Existing
+   * players get the join state now: empty hands when `armedWeapons`, and
+   * humans down on death when `downedState`. Off restores the defaults.
+   */
+  public setZombotsRules(rules: ZombotsSimRules | null): void {
+    this.zombotsRules = rules ? { ...rules } : null;
+    for (const p of this.ruleRoster()) {
+      p.setArmedWeapons(null);
+      p.downOnDeath = false;
+      // Adapter bookkeeping at configure time, not a tick rule: humans are
+      // the players without a bot flag.
+      this.applyZombotsRulesTo(p, !p.isBot);
+    }
+  }
+
+  private applyZombotsRulesTo(player: Player, human: boolean): void {
+    const rules = this.zombotsRules;
+    if (!rules) return;
+    if (rules.armedWeapons) player.setArmedWeapons([]);
+    player.downOnDeath = rules.downedState && human;
+  }
+
+  private passThroughTeamOf(attacker: Player): TeamId | null {
+    if (!this.zombotsRules?.teammatesPassThrough || attacker.isAgent) {
+      return null;
+    }
+    return attacker.team;
+  }
+
+  /**
+   * Arm one gun for a player (armory rack take). Refills that gun's ammo
+   * unless `refill` is false; an empty-handed player draws it. Returns false
+   * for an unknown player or id, or when armed weapons are not restricted.
+   */
+  public armPlayer(id: string, weaponId: number, refill = true): boolean {
+    const player = this.players.get(id);
+    if (!player) return false;
+    return player.armWeapon(weaponId, this.simTick, refill);
+  }
+
+  /** Replenish spare clips for one armed gun (rack refill) and select it. */
+  public refillPlayerAmmo(id: string, weaponId: number): boolean {
+    const player = this.players.get(id);
+    if (!player || !player.isWeaponArmed(weaponId)) return false;
+    player.refillWeapon(weaponId, this.simTick);
+    return true;
+  }
+
+  /** Replace a player's armed set (e.g. `[]` on a new run). Null = all. */
+  public setArmedWeapons(id: string, ids: readonly number[] | null): boolean {
+    const player = this.players.get(id);
+    if (!player) return false;
+    player.setArmedWeapons(ids);
+    return true;
+  }
+
+  /** Melee base damage override (zombie wave damage). Null clears it. */
+  public setMeleeDamageOverride(id: string, damage: number | null): boolean {
+    const player = this.players.get(id);
+    if (!player) return false;
+    player.meleeDamageOverride = damage !== null && Number.isFinite(damage)
+      ? Math.max(0, damage)
+      : null;
+    return true;
+  }
+
+  public isDowned(id: string): boolean {
+    return this.players.get(id)?.downed === true;
+  }
+
+  /**
+   * Stand a downed player up where they lie at `healthFraction` of max HP.
+   * Returns the player, or null when they are not downed.
+   */
+  public revivePlayer(
+    id: string,
+    healthFraction: number,
+    nowMs = Date.now(),
+  ): Player | null {
+    const player = this.players.get(id);
+    if (!player) return null;
+    return player.revive(healthFraction, this.simTick, nowMs) ? player : null;
+  }
+
+  /**
+   * The downed body `viewerId` is looking at within `reach` (eye to body),
+   * walls blocking, or null. For the revive prompt: the zombots glue feeds
+   * the answer to `ReviveTracker.observeLook`.
+   */
+  public downedBodyInSight(viewerId: string, reach: number): string | null {
+    const viewer = this.players.get(viewerId);
+    if (!viewer || !viewer.alive || !(reach > 0)) return null;
+    const origin = { x: viewer.x, y: viewer.y, z: viewer.z };
+    const direction = directionFromYawPitch(viewer.yaw, viewer.pitch);
+    const wallDist = this.collision.raycastSolid(origin, direction, reach);
+    const range = wallDist ?? reach;
+    const bodies: { playerId: string; pose: ReturnType<Player["poseAt"]> }[] =
+      [];
+    for (const p of this.ruleRoster()) {
+      if (p.id === viewerId || !p.downed) continue;
+      bodies.push({ playerId: p.id, pose: p.poseAt(this.simTick) });
+    }
+    if (bodies.length === 0) return null;
+    return hitscanPoses(origin, direction, range, bodies)?.playerId ?? null;
   }
 
   public processRespawns(tick: number): Player[] {

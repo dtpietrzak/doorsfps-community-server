@@ -121,6 +121,7 @@ export function buildInterpolatedReadyAction(
   return {
     input,
     shoot: onCombatEdge ? curr.shoot : false,
+    melee: onCombatEdge ? curr.melee === true : false,
     reload: onCombatEdge ? curr.reload : false,
     weapon: onCombatEdge ? curr.weapon : undefined,
     ability: onCombatEdge ? curr.ability : undefined,

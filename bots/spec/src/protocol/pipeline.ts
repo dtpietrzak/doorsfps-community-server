@@ -21,6 +21,8 @@ import type {
  * v4: configs carried the aim-planner and trigger-discipline knobs.
  * v5: the public cut. A pawn carries `role` and optional `profileData`, and
  * no config. Frames carry no `humanHeatByPole`. The pool-profile frame is gone.
+ * A frame may append `openSlidingDoorIds` (see the doors byte). Old frames
+ * that never set that bit stay valid with the field absent.
  * Not the `bot-official` state-host protocol, which has its own numbering.
  */
 export const BOT_THINK_PIPELINE_PROTOCOL_VERSION = 5;
@@ -844,24 +846,44 @@ function readPlayer(reader: Reader): PlayerSnapshot {
   };
 }
 
+/**
+ * Bit on the doors byte. Old frames store 0 or 1 there and end at matchOver,
+ * so they still decode with the list absent. An empty list sets the bit and
+ * writes a zero count, which is not the same as leaving it off.
+ */
+const FRAME_OPEN_SLIDING_DOORS = 2;
+
 function writeFrame(writer: Writer, frame: ThinkFrame): void {
   writer.u32(frame.tick);
   writer.f64(frame.simDelta);
   writer.string(frame.mapRevision);
-  writer.bool(frame.doorsOpen);
+  const openIds = frame.openSlidingDoorIds;
+  let doorByte = frame.doorsOpen ? 1 : 0;
+  if (openIds !== undefined) doorByte |= FRAME_OPEN_SLIDING_DOORS;
+  writer.u8(doorByte);
   writer.i32(frame.doorChangeTick ?? NULL_I32);
   writer.i32(frame.teamScoreA);
   writer.i32(frame.teamScoreB);
   writer.u32(frame.players.length);
   for (const player of frame.players) writePlayer(writer, player);
   writer.bool(frame.matchOver === true);
+  if (openIds !== undefined) {
+    if (openIds.length > 65535) {
+      throw new Error("pipeline frame has too many open sliding doors");
+    }
+    writer.u16(openIds.length);
+    for (let index = 0; index < openIds.length; index += 1) {
+      writer.string(openIds[index]!);
+    }
+  }
 }
 
 function readFrame(reader: Reader): ThinkFrame {
   const tick = reader.u32();
   const simDelta = reader.f64();
   const mapRevision = reader.string();
-  const doorsOpen = reader.bool();
+  const doorByte = reader.u8();
+  const doorsOpen = (doorByte & 1) !== 0;
   const doorChangeTick = reader.i32();
   const teamScoreA = reader.i32();
   const teamScoreB = reader.i32();
@@ -871,6 +893,14 @@ function readFrame(reader: Reader): ThinkFrame {
     players.push(readPlayer(reader));
   }
   const matchOver = reader.bool();
+  let openSlidingDoorIds: string[] | undefined;
+  if ((doorByte & FRAME_OPEN_SLIDING_DOORS) !== 0) {
+    const count = reader.u16();
+    openSlidingDoorIds = [];
+    for (let index = 0; index < count; index += 1) {
+      openSlidingDoorIds.push(reader.string());
+    }
+  }
   return {
     tick,
     simDelta,
@@ -880,6 +910,7 @@ function readFrame(reader: Reader): ThinkFrame {
     teamScoreA,
     teamScoreB,
     players,
+    ...(openSlidingDoorIds !== undefined ? { openSlidingDoorIds } : {}),
     ...(matchOver ? { matchOver: true } : {}),
   };
 }
@@ -905,7 +936,11 @@ function readThinkInput(reader: Reader): ThinkBatchInput {
   return { frame, applyTick, bots };
 }
 
-function writeInput(writer: Writer, input: BotInputIntent): void {
+function writeInput(
+  writer: Writer,
+  input: BotInputIntent,
+  melee = false,
+): void {
   let flags = 0;
   if (input.forward) flags |= 1;
   if (input.backward) flags |= 2;
@@ -914,14 +949,16 @@ function writeInput(writer: Writer, input: BotInputIntent): void {
   if (input.jump) flags |= 16;
   if (input.sprint) flags |= 32;
   if (input.crouch) flags |= 64;
+  // The action flags byte is full, so a melee swing uses the spare input bit.
+  if (melee) flags |= 128;
   writer.u8(flags);
   writer.f64(input.yaw);
   writer.f64(input.pitch);
 }
 
-function readInput(reader: Reader): BotInputIntent {
+function readInput(reader: Reader): { input: BotInputIntent; melee: boolean } {
   const flags = reader.u8();
-  return {
+  const input = {
     forward: (flags & 1) !== 0,
     backward: (flags & 2) !== 0,
     left: (flags & 4) !== 0,
@@ -932,6 +969,7 @@ function readInput(reader: Reader): BotInputIntent {
     yaw: reader.f64(),
     pitch: reader.f64(),
   };
+  return { input, melee: (flags & 128) !== 0 };
 }
 
 /** Max look samples per action on the wire (one per sim tick of a bot period). */
@@ -980,7 +1018,7 @@ function writeAction(writer: Writer, action: ReadyAction | null): void {
   if (action.ability !== undefined) flags |= 128;
   writer.u8(flags);
   if (action.input !== null) {
-    writeInput(writer, action.input);
+    writeInput(writer, action.input, action.melee === true);
     writeLookSamples(writer, action.lookSamples);
   }
   if (action.weapon !== undefined) writer.u16(action.weapon);
@@ -990,7 +1028,8 @@ function writeAction(writer: Writer, action: ReadyAction | null): void {
 function readAction(reader: Reader): ReadyAction | null {
   const flags = reader.u8();
   if ((flags & 1) === 0) return null;
-  const input = (flags & 2) !== 0 ? readInput(reader) : null;
+  const read = (flags & 2) !== 0 ? readInput(reader) : null;
+  const input = read === null ? null : read.input;
   const lookSamples = input !== null ? readLookSamples(reader) : null;
   const weapon = (flags & 64) !== 0 ? reader.u16() : undefined;
   const ability = (flags & 128) !== 0 ? reader.string() : undefined;
@@ -1000,6 +1039,7 @@ function readAction(reader: Reader): ReadyAction | null {
       ? {}
       : { lookSamples }),
     ...((flags & 4) === 0 ? {} : { shoot: (flags & 8) !== 0 }),
+    ...(read !== null && read.melee ? { melee: true } : {}),
     ...((flags & 16) === 0 ? {} : { reload: (flags & 32) !== 0 }),
     ...(weapon === undefined ? {} : { weapon }),
     ...(ability === undefined ? {} : { ability }),

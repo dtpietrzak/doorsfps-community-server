@@ -11,6 +11,7 @@ import {
   SLIDING_DOOR_WIDTH,
   type SlidingDoorRef,
 } from "./slidingDoors.ts";
+import { abs } from "../math/index.ts";
 
 export type WindowVec2 = { x: number; z: number };
 
@@ -236,6 +237,76 @@ export function authoredWallSpans(
 }
 
 /**
+ * Which body a collision copy moves. Only zombots maps tell them apart
+ * (notes/zombots.md step 12c): there a window is solid wall for humans,
+ * and a zombie climbs it like a 0.9 m half wall. Other maps: no difference.
+ */
+export type WindowBody = "human" | "zombie";
+
+/** A collision slab with no window role. */
+export const WINDOW_PART_NONE = 0;
+/** The slab above a window opening. Zombies on zombots maps ignore it. */
+export const WINDOW_PART_HEADER = 1;
+/**
+ * Zombots only: an invisible slab filling the opening, sill to header.
+ * It blocks human movement and nothing else: shots, sight and zombies pass.
+ */
+export const WINDOW_PART_PANE = 2;
+export type WindowPart =
+  | typeof WINDOW_PART_NONE
+  | typeof WINDOW_PART_HEADER
+  | typeof WINDOW_PART_PANE;
+
+export type CollisionWallSpan = WallSpan & { windowPart: WindowPart };
+
+/**
+ * Collision slabs for one authored wall: {@link authoredWallSpans} with each
+ * window header tagged, plus a pane in each opening when `sealWindows`
+ * (zombots maps). Every MapCollision copy builds from this, in this order,
+ * so server, bot engine and client prediction agree.
+ */
+export function collisionWallSpans(
+  wall: { id: string; a: WindowVec2; b: WindowVec2; kind?: string },
+  windows: readonly WindowRef[] | undefined,
+  yMin: number,
+  yMax: number,
+  doors: readonly SlidingDoorRef[] | undefined,
+  sealWindows: boolean,
+): CollisionWallSpan[] {
+  const spans = authoredWallSpans(wall, windows, yMin, yMax, doors);
+  const full = wall.kind !== "half" && wall.kind !== "float";
+  const out: CollisionWallSpan[] = [];
+  for (let i = 0; i < spans.length; i++) {
+    const span = spans[i]!;
+    // Only a cut full wall has a slab ending at the sill or starting at the head.
+    const header = full && span.yMin > yMin + 1e-4 &&
+      abs(span.yMin - WINDOW_HEAD_Y) <= 1e-4;
+    out.push({ ...span, windowPart: header ? WINDOW_PART_HEADER : WINDOW_PART_NONE });
+    const sill = full && span.yMax < yMax - 1e-4 &&
+      abs(span.yMax - WINDOW_SILL_Y) <= 1e-4;
+    if (sill && sealWindows) {
+      out.push({
+        a: { x: span.a.x, z: span.a.z },
+        b: { x: span.b.x, z: span.b.z },
+        yMin: WINDOW_SILL_Y,
+        yMax: WINDOW_HEAD_Y,
+        windowPart: WINDOW_PART_PANE,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * True when a moving body ignores this slab. Panes block only humans; on
+ * zombots maps a zombie also ignores the header so its jump arc over the
+ * sill isn't cut short. `zombieClimb` is false everywhere but zombots.
+ */
+export function windowPartPassable(part: number, zombieClimb: boolean): boolean {
+  return zombieClimb && part !== WINDOW_PART_NONE;
+}
+
+/**
  * Top-down pieces of a wall. The opening is a gap in the line.
  * Half and float walls are drawn whole.
  */
@@ -257,19 +328,56 @@ export function wallPlanSegments(
   return plan.length > 0 ? plan : [{ a: wall.a, b: wall.b }];
 }
 
+type GapDoor = SlidingDoorRef & { id?: string };
+
+/**
+ * `openDoorIds` omitted or null: every door is a gap (arenas).
+ * A set or array, including empty: only those ids are gaps, so a closed
+ * zombots door stays solid. A door with no id counts only in the omitted case.
+ */
+function doorsForGaps(
+  doors: readonly GapDoor[] | undefined,
+  openDoorIds: ReadonlySet<string> | readonly string[] | null | undefined,
+): readonly GapDoor[] | undefined {
+  if (!doors || doors.length === 0 || openDoorIds == null) return doors;
+  const open = doorIdSet(openDoorIds);
+  const kept: GapDoor[] = [];
+  for (let i = 0; i < doors.length; i++) {
+    const door = doors[i]!;
+    if (door.id !== undefined && open.has(door.id)) kept.push(door);
+  }
+  return kept;
+}
+
+function doorIdSet(ids: ReadonlySet<string> | readonly string[]): ReadonlySet<string> {
+  if (isDoorIdSet(ids)) return ids;
+  const open = new Set<string>();
+  for (let i = 0; i < ids.length; i++) open.add(ids[i]!);
+  return open;
+}
+
+function isDoorIdSet(
+  ids: ReadonlySet<string> | readonly string[],
+): ids is ReadonlySet<string> {
+  return ids instanceof Set;
+}
+
 /**
  * Top-down gaps a closure walk should treat as open: window widths and
  * full-height sliding doors on full walls. Half and float walls are omitted.
  * A center that sits off its wall is ignored.
  * Overlapping openings on one wall merge into one span.
+ * `openDoorIds` defaults to every door. Pass a set to seal the rest.
  */
 export function interiorOpeningGaps(
   walls: readonly { id?: string; a: WindowVec2; b: WindowVec2; kind?: string }[],
   windows: readonly WindowRef[] | undefined,
-  doors: readonly SlidingDoorRef[] | undefined,
+  doors: readonly GapDoor[] | undefined,
+  openDoorIds?: ReadonlySet<string> | readonly string[] | null,
 ): { a: WindowVec2; b: WindowVec2 }[] {
+  const gapDoors = doorsForGaps(doors, openDoorIds);
   const out: { a: WindowVec2; b: WindowVec2 }[] = [];
-  if ((!windows || windows.length === 0) && (!doors || doors.length === 0)) {
+  if ((!windows || windows.length === 0) && (!gapDoors || gapDoors.length === 0)) {
     return out;
   }
   for (const wall of walls) {
@@ -287,7 +395,7 @@ export function interiorOpeningGaps(
       ...openingIntervals(
         wall.a,
         axis,
-        doorCentersOnWall(wall.id, doors),
+        doorCentersOnWall(wall.id, gapDoors),
         SLIDING_DOOR_WIDTH / 2,
       ),
     ]);

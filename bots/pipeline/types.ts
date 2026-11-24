@@ -28,6 +28,8 @@ export type ReadyAction = {
    */
   lookSamples?: import("../types.ts").BotLookSample[];
   shoot?: boolean;
+  /** One melee swing, enqueued as `kind: "melee"` like a human's Melee packet. */
+  melee?: boolean;
   reload?: boolean;
   /** Equip this weapon id (edge-only through apply interp, like shoot/reload). */
   weapon?: number;

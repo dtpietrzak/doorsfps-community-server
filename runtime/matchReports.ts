@@ -88,6 +88,8 @@ export type MatchReportBuildInput = {
   serverId: string;
   modeId: string | null;
   mapName: string;
+  /** Zombots: wave reached (the run's score). Null / omitted elsewhere. */
+  zombotsWaveReached?: number | null;
 };
 
 export type BuiltMatchReport = {
@@ -212,6 +214,9 @@ export function buildMatchReport(
     // Occupancy for open XP/coin tiers when serverId is host+slot.
     ...(input.modeId ? { modeId: input.modeId } : {}),
     ...(input.raid ? { raidId: input.raid.raidId } : {}),
+    ...(input.zombotsWaveReached != null
+      ? { zombotsWaveReached: input.zombotsWaveReached }
+      : {}),
     mapName: input.mapName,
     winningTeam: input.winner,
     scoreA: input.scores.A,

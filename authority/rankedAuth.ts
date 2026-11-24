@@ -220,7 +220,12 @@ export function isOpenOfficialServerId(
   modeId?: string | null,
 ): boolean {
   const occupancy = (modeId ?? "").trim().toLowerCase();
-  if (occupancy === "raid" || (id ?? "").trim().toLowerCase() === "raid") {
+  const bareId = (id ?? "").trim().toLowerCase();
+  // Raid and zombots are official co-op occupancies outside the difficulty ladder.
+  if (
+    occupancy === "raid" || occupancy === "zombots" ||
+    bareId === "raid" || bareId === "zombots"
+  ) {
     return true;
   }
   const mode = resolveOfficialMode({ modeId, serverId: id });

@@ -151,6 +151,7 @@ export function normalizeReadyAction(
     input,
     ...(lookSamples === undefined ? {} : { lookSamples }),
     shoot: action.shoot,
+    ...(action.melee === true ? { melee: true } : {}),
     reload: action.reload,
     weapon: action.weapon,
     ability: action.ability,

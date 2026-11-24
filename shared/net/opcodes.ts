@@ -60,6 +60,10 @@ export const NetOpcode = {
   Melee: 43,
   /** Client finished building the map (client → server, empty). */
   MapLoaded: 44,
+  /** Zombots HUD block (server → all, on change). */
+  ZombotsState: 45,
+  /** Zombots E / right click (client → server). Same payload as Shoot. */
+  Interact: 46,
 } as const;
 
 export type NetOpcode = (typeof NetOpcode)[keyof typeof NetOpcode];
@@ -110,6 +114,8 @@ export const OPCODE_BY_EVENT: Readonly<Record<string, NetOpcode>> = {
   ping: NetOpcode.Ping,
   adminCommandResult: NetOpcode.AdminCommandResult,
   botHeatmapTracking: NetOpcode.BotHeatmapTracking,
+  zombotsState: NetOpcode.ZombotsState,
+  interact: NetOpcode.Interact,
 };
 
 const EVENT_BY_OPCODE: string[] = [];

@@ -140,6 +140,9 @@ import {
 import type { RaidMatch } from "../raid/RaidMatch.ts";
 import { RAIDS } from "../shared/campaign/raids.ts";
 import { RaidRuntime } from "./raidRuntime.ts";
+import { ZOMBOTS_HUMAN_TEAM, ZombotsRuntime } from "./zombotsRuntime.ts";
+import { ZOMBOTS_MODE_ID } from "../players/zombotsSimRules.ts";
+import { ZOMBOTS_TUNING } from "../shared/zombots/zombotsTuning.ts";
 import {
   registerSessionEvents,
   type SeatedPlayer,
@@ -186,6 +189,12 @@ export class GameServer implements ReplayIntegrationSinkHandle {
   private get raidLoadedPlayerIds(): Set<string> {
     return this.raidRuntime.loadedPlayerIds;
   }
+
+  /**
+   * Live zombots slot (notes/zombots.md step 11). Owns the run's rules
+   * objects, zombies, load gate and HUD block. GameServer only branches.
+   */
+  private readonly zombotsRuntime: ZombotsRuntime;
 
   private readonly authority: AuthorityAdapter;
   /** Match, abandon, heatmap, and reservation reports. Owns the dedup keys. */
@@ -411,6 +420,7 @@ export class GameServer implements ReplayIntegrationSinkHandle {
       players: this.players,
       runtimeMatchId: () => this.runtimeMatchId,
       raidCheckpointState: () => this.getRaidCheckpointState(),
+      zombotsCheckpointState: () => this.zombotsRuntime?.checkpointState(),
       matchMetadata: (tick) => this.getMatchMetadata(tick),
       createReplayLifecycleClient: () =>
         this.authority.createReplayLifecycleClient?.() ?? null,
@@ -460,7 +470,8 @@ export class GameServer implements ReplayIntegrationSinkHandle {
     this.teamRebalance = new TeamRebalance({
       players: this.players,
       sessions: () => this.sessions,
-      isRanked: () => this.isRanked(),
+      // Zombots keeps every human on one side: no switches, no votes.
+      isRanked: () => this.isRanked() || this.isZombotsRuntime(),
       isRaid: () => this.isRaidRuntime(),
       reconcileBots: () => {
         this.bots.reconcile(this.maxPlayers);
@@ -502,6 +513,40 @@ export class GameServer implements ReplayIntegrationSinkHandle {
       },
       kickForAfk: (player) => this.kickPlayerForAfk(player),
     });
+    this.zombotsRuntime = new ZombotsRuntime({
+      isZombotsRuntime: () => this.isZombotsRuntime(),
+      players: this.players,
+      bots: {
+        spawnZombie: (spec) => this.bots.spawnZombie(spec),
+        despawnZombie: (id) => this.bots.despawnZombie(id),
+        clearZombies: () => this.bots.clearZombies(),
+      },
+      sessions: () => this.sessions,
+      map: () => this.map,
+      mapPath: () => this.mapPath,
+      setActiveMap: (entry) => this.setActiveMap(entry),
+      beginRuntimeMatchIdentity: (tick) => this.beginRuntimeMatchIdentity(tick),
+      notifyMatchStart: (tick) => this.replay.notifyMatchStart(tick),
+      resetHeatmaps: () => this.heatmaps.resetForNewMatch(),
+      dismissHumanToMenu: (player, packet) => {
+        this.dismissHumanToMenu(player, packet);
+      },
+      kickForAfk: (player) => this.kickPlayerForAfk(player),
+    });
+    if (this.isZombotsRuntime()) {
+      if (this.map.mirrorMode !== "zombots") {
+        throw new Error(
+          `Zombots mode needs a zombots map; "${this.map.name}" is not one.`,
+        );
+      }
+      this.bots.setZombotsMode(true);
+      this.zombotsRuntime.activate();
+      // Arena energy doors stay shut for the whole slot. The open / closed
+      // cycle is a score-match rule; zombots never runs it. `idle` is the
+      // existing lock (a raid lobby uses the same one) and it rides the
+      // match-config event, so a replay stays shut too.
+      this.players.setRaidDoorPolicy("idle");
+    }
     // Epic 4.6: keep BotManager agents-domain stream in sync with match reseeds.
     this.players.setSimRngReseedListener((_seed, streams) => {
       this.bots.setAgentsRandom(streams.agents);
@@ -512,6 +557,20 @@ export class GameServer implements ReplayIntegrationSinkHandle {
 
   private isRaidRuntime(): boolean {
     return this.modeId === "raid" || this.rankedServerId === "raid";
+  }
+
+  private isZombotsRuntime(): boolean {
+    return this.modeId === ZOMBOTS_MODE_ID;
+  }
+
+  /**
+   * Humans this runtime seats. Zombots caps the party at the tuning table's
+   * player max; its zombies never take a human seat (and are never evicted).
+   */
+  private humanCapacity(): number {
+    return this.isZombotsRuntime()
+      ? Math.min(this.maxPlayers, ZOMBOTS_TUNING.players.max)
+      : this.maxPlayers;
   }
 
   /** Downloadable / self-hosted open server (not official Easy/Medium/Hard). */
@@ -588,8 +647,8 @@ export class GameServer implements ReplayIntegrationSinkHandle {
         playerCount: this.players.size,
         humanCount,
         botCount: this.bots.count,
-        maxPlayers: this.maxPlayers,
-        maxPartySize: this.players.maxPartySize(this.maxPlayers),
+        maxPlayers: this.humanCapacity(),
+        maxPartySize: this.players.maxPartySize(this.humanCapacity()),
         map: this.map.name,
         tick: this.players.tick,
         scores: this.players.getScores(),
@@ -1074,6 +1133,12 @@ export class GameServer implements ReplayIntegrationSinkHandle {
           raid: this.raid.hud(this.players.getScores()[this.raid.humanTeam]),
         }
         : {}),
+      ...(this.isZombotsRuntime()
+        ? {
+          matchKind: "zombots" as const,
+          zombots: this.zombotsRuntime.hud() ?? undefined,
+        }
+        : {}),
       // Open matches: client uses autofill target for change-team eligibility UI.
       ...(!ranked ? { autofillBots: this.getAutofillBots() } : {}),
       ...(!ranked
@@ -1275,6 +1340,10 @@ export class GameServer implements ReplayIntegrationSinkHandle {
       () => this.gameOverXpMode(),
     );
     if (raidDecorated) return raidDecorated;
+    // No rewards in zombots (decision 7), so no xpMode either.
+    // It always returns to the menu, so the release lock changes nothing.
+    const zombotsDecorated = this.zombotsRuntime.decorateGameOver(packet);
+    if (zombotsDecorated) return zombotsDecorated;
     const xpMode = this.gameOverXpMode();
     if (shouldHoldMatchRestart(this.releaseLocked)) {
       return {
@@ -1291,7 +1360,10 @@ export class GameServer implements ReplayIntegrationSinkHandle {
   }
 
   private enrichGameOver(packet: GameOverPacket): GameOverPacket {
-    if (!this.raid && !shouldHoldMatchRestart(this.releaseLocked)) {
+    if (
+      !this.raid && !this.isZombotsRuntime() &&
+      !shouldHoldMatchRestart(this.releaseLocked)
+    ) {
       this.mapVote.begin();
     }
     return this.decorateGameOver(packet);
@@ -1486,6 +1558,9 @@ export class GameServer implements ReplayIntegrationSinkHandle {
       serverId: this.rankedServerId,
       modeId: this.modeId,
       mapName: this.map.name,
+      zombotsWaveReached: this.zombotsRuntime.active
+        ? this.zombotsRuntime.waveReached()
+        : null,
     });
     if ("skip" in built) {
       // Guests have nothing to grant. Authority would also grant nothing to
@@ -1647,6 +1722,12 @@ export class GameServer implements ReplayIntegrationSinkHandle {
 
     // Last human left official ranked → clean pre-match for the next party.
     if (this.maybeResetEmptyRankedInstance()) {
+      return;
+    }
+    if (this.isZombotsRuntime()) {
+      // Last one out idles the slot: a fresh run (doors shut) for the next
+      // party. Earlier leaves reach the rules through the roster diff.
+      if (this.players.humanCount() === 0) this.zombotsRuntime.resetIdle();
       return;
     }
     if (this.isRaidRuntime() && this.players.humanCount() === 0) {
@@ -1827,7 +1908,7 @@ export class GameServer implements ReplayIntegrationSinkHandle {
 
     // Party claim cannot exceed this runtime's supported max (human capacity
     // and absolute claim ceiling). Authority config is validated the same way.
-    const supportedParty = this.players.maxPartySize(this.maxPlayers);
+    const supportedParty = this.players.maxPartySize(this.humanCapacity());
     if (partySize != null && partySize > supportedParty) {
       return { ok: false, error: JoinErrors.AssignmentInvalid };
     }
@@ -1869,6 +1950,37 @@ export class GameServer implements ReplayIntegrationSinkHandle {
 
     if (this.players.isNameTaken(name)) {
       return { ok: false, error: JoinErrors.NameTaken };
+    }
+
+    if (this.isZombotsRuntime()) {
+      // Humans only: zombies hold no seats and are never evicted for a join.
+      if (this.players.humanCount() >= this.humanCapacity()) {
+        if (assignmentId) {
+          this.reportOpenReservationAck({
+            reservationId: assignmentId,
+            status: "server_full",
+            jti: admissionJti,
+          });
+        }
+        return { ok: false, error: JoinErrors.ServerFull };
+      }
+      if (assignmentId && admissionJti && admissionConsume === "accepted") {
+        this.reportOpenReservationAck({
+          reservationId: assignmentId,
+          status: "member_connected",
+          jti: admissionJti,
+        });
+      }
+      return {
+        ok: true,
+        name,
+        accountUserId,
+        partyId,
+        partySize,
+        assignmentId,
+        botsEvictedForJoin: 0,
+        ...profile,
+      };
     }
 
     // Bots can be evicted to make room for humans (after name validation).
@@ -2046,8 +2158,11 @@ export class GameServer implements ReplayIntegrationSinkHandle {
       const assignmentId = typeof session.data.assignmentId === "string"
         ? session.data.assignmentId
         : null;
+      const zombots = this.isZombotsRuntime();
       const joinTeam = this.raid
         ? this.raid.humanTeam
+        : zombots
+        ? ZOMBOTS_HUMAN_TEAM
         : this.players.pickTeamForJoin({
           partyId,
           partySize,
@@ -2060,10 +2175,12 @@ export class GameServer implements ReplayIntegrationSinkHandle {
         partyId,
         partySize,
       });
-      const seatFree = this.admissionBots.ensureHumanJoinSlots(
-        seatsNeeded,
-        joinTeam,
-      );
+      const seatFree = zombots
+        ? {
+          ok: this.players.humanCount() < this.humanCapacity(),
+          evicted: 0,
+        }
+        : this.admissionBots.ensureHumanJoinSlots(seatsNeeded, joinTeam);
       if (!seatFree.ok) {
         session.emit("error", { message: JoinErrors.ServerFull });
         session.disconnect();
@@ -2156,6 +2273,9 @@ export class GameServer implements ReplayIntegrationSinkHandle {
       adminCommandHost: () => this.adminCommandHost(),
       raid: () => this.raid,
       raidLoadedPlayerIds: () => this.raidLoadedPlayerIds,
+      zombotsMapLoaded: (playerId) => this.zombotsRuntime.markLoaded(playerId),
+      zombotsInteract: (playerId, raw) =>
+        this.zombotsRuntime.queueInteract(playerId, raw),
       handleMatchReady: (playerId, ready) =>
         this.handleMatchReady(playerId, ready),
       dropPlayer: (playerId) => this.dropPlayer(playerId),
@@ -2355,6 +2475,15 @@ export class GameServer implements ReplayIntegrationSinkHandle {
     // --- SIM: PruneDeadAgents (post-weapons) ---
     this.pruneDeadAgents(tick);
 
+    // --- SIM: Zombots --- rules after weapons: hits, kills, downs, interacts,
+    // waves. Doors, revives and rack takes land before MovePhysics.
+    let zombotsOver: GameOverPacket | null = null;
+    if (this.zombotsRuntime.active) {
+      const zombots = this.zombotsRuntime.step(tick, weapons.outcomes, nowMs);
+      for (const fact of zombots.facts) events.push({ type: "Zombots", fact });
+      zombotsOver = zombots.gameOver;
+    }
+
     // --- SIM: MovePhysics + OverlapDeath ---
     const overlapDeaths = this.players.update(tick, nowMs);
     for (const death of overlapDeaths) {
@@ -2394,7 +2523,8 @@ export class GameServer implements ReplayIntegrationSinkHandle {
       }
     }
 
-    this.raidRuntime.afkTick(nowMs);
+    if (this.zombotsRuntime.active) this.zombotsRuntime.afkTick(nowMs);
+    else this.raidRuntime.afkTick(nowMs);
 
     this.teamRebalance.tick(nowMs);
 
@@ -2408,6 +2538,10 @@ export class GameServer implements ReplayIntegrationSinkHandle {
     // Pure transitions live on PlayerManager (checkMatchEnd / checkMatchTimeLimit /
     // forceEndMatch → endMatch). Driver side effects stay here: onMatchEnded
     // (reports/heatmaps/lobby) + GameOver facts for emitSimTickEvents.
+    if (zombotsOver) {
+      this.onMatchEnded(zombotsOver, nowMs);
+      events.push({ type: "GameOver", gameOver: zombotsOver });
+    }
     if (scores.length > 0) {
       const raidOver = this.handleRaidScores(scores);
       const gameOver = raidOver ?? this.players.checkMatchEnd(tick);
@@ -2431,7 +2565,10 @@ export class GameServer implements ReplayIntegrationSinkHandle {
       }
     }
 
-    if (!this.players.isMatchOver() && !this.raid) {
+    // Zombots runs are endless: only a wipe ends one.
+    if (
+      !this.players.isMatchOver() && !this.raid && !this.zombotsRuntime.active
+    ) {
       const timeUp = this.players.checkMatchTimeLimit(tick);
       if (timeUp) {
         this.onMatchEnded(timeUp, nowMs);
@@ -2505,6 +2642,8 @@ export class GameServer implements ReplayIntegrationSinkHandle {
       this.flushPendingReplayMatchEnd(tick);
 
       this.emitSimTickEvents(tick, result.events);
+      // Zombots HUD block, only on ticks where it changed.
+      this.zombotsRuntime.flush();
 
       // --- NON-SIM: Roster leaves (epic 7.1) — was in-step MIXED emit ---
       // Order matches construction in stepSim's connection-timeout loop.
@@ -2555,6 +2694,12 @@ export class GameServer implements ReplayIntegrationSinkHandle {
   private finishIntermission(tick: number, nowMs: number): void {
     if (this.isRaidRuntime()) {
       this.closeEndedRaidSession();
+      return;
+    }
+    if (this.zombotsRuntime.active) {
+      // Like a raid's sit: everyone back to the menu, the slot idles
+      // (a release drain included).
+      this.zombotsRuntime.closeEnded();
       return;
     }
     if (shouldHoldMatchRestart(this.releaseLocked)) {

@@ -740,3 +740,39 @@ Deno.test("snapshot: shotgun pumping rides bit 7 of the weapon byte", () => {
   assertEquals(out.players[1]!.weapon, 2);
   assertEquals(out.players[1]!.pumping, undefined);
 });
+
+Deno.test("Input bundled 60 Hz frames round-trip compactly", () => {
+  const frames = Array.from({ length: 6 }, (_, i) => ({
+    sequence: 100 + i,
+    forward: i % 2 === 0,
+    backward: false,
+    left: i === 2,
+    right: i === 3,
+    jump: i === 1,
+    sprint: true,
+    crouch: i === 5,
+    meleeLunge: i === 4,
+    yaw: -1.5 + i * 0.25,
+    pitch: -0.1 + i * 0.02,
+  }));
+  const payload = { ...frames[frames.length - 1]!, frames };
+  const buf = encodeGamePacket("input", payload)!;
+  // 4-byte header + 6 * 9 bytes = 58 bytes.
+  assertEquals(buf.byteLength, 58);
+  const back = roundtrip("input", payload) as typeof payload;
+  assertEquals(back.sequence, 105);
+  assertEquals(back.crouch, true);
+  assertEquals(back.frames.length, 6);
+  for (let i = 0; i < 6; i++) {
+    assertEquals(back.frames[i]!.sequence, frames[i]!.sequence);
+    assertEquals(back.frames[i]!.forward, frames[i]!.forward);
+    assertEquals(back.frames[i]!.left, frames[i]!.left);
+    assertEquals(back.frames[i]!.right, frames[i]!.right);
+    assertEquals(back.frames[i]!.jump, frames[i]!.jump);
+    assertEquals(back.frames[i]!.sprint, frames[i]!.sprint);
+    assertEquals(back.frames[i]!.crouch, frames[i]!.crouch);
+    assertEquals(back.frames[i]!.meleeLunge, frames[i]!.meleeLunge);
+    assertEquals(Math.round(back.frames[i]!.yaw * 1000), Math.round(frames[i]!.yaw * 1000));
+    assertEquals(Math.round(back.frames[i]!.pitch * 1000), Math.round(frames[i]!.pitch * 1000));
+  }
+});

@@ -229,7 +229,13 @@ export type YawPoleMap = {
   walls?: readonly (WallCornerSegment & { id?: string })[] | null;
   /** Used only when corners are recomputed, so a windowed room is not solid. */
   windows?: readonly { wallId: string; center: WallCornerPoint }[] | null;
-  doors?: readonly { wallId: string; center: WallCornerPoint }[] | null;
+  doors?: readonly { id?: string; wallId: string; center: WallCornerPoint }[] | null;
+  /**
+   * When set, only these sliding doors are gaps during a corner recompute.
+   * Omitted means every door is open. Empty seals every sliding door.
+   * Stored corners skip this; the engine refreshes those when the set changes.
+   */
+  openSlidingDoorIds?: readonly string[] | null;
   /** Zombots seals the energy-door spans. Other modes leave them open. */
   mirrorMode?: string | null;
 };
@@ -423,9 +429,10 @@ export function splitYawPoles(map: YawPoleMap): {
   const doorKeys = new Set(doorPts.map((p) => yawPoleKey(p.x, p.z)));
 
   // Prefer author-stored corners; recompute from walls when empty (legacy).
-  // Do not pass doors here — orange poles are tracked separately.
-  // Gaps are only needed for that recompute. Stored corners skip the walk,
-  // and this runs inside a think.
+  // Do not pass team doors here — orange poles are tracked separately.
+  // Gaps matter only on that recompute, and this runs inside a think.
+  // An explicit open set seals every sliding door that is not listed, so a
+  // legacy map with no stored corners still treats a closed door as wall.
   const stored = map.wallCorners;
   const recompute = stored == null || stored.length === 0;
   const corners = resolveWallCorners(
@@ -438,6 +445,7 @@ export function splitYawPoles(map: YawPoleMap): {
           walls: map.walls ?? [],
           windows: map.windows,
           doors: map.doors,
+          openDoorIds: map.openSlidingDoorIds,
           bounds: map.bounds,
           mirrorMode: map.mirrorMode,
           teamA: map.teamA,

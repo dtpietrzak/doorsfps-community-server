@@ -17,6 +17,7 @@ Deno.test("SimTickEvent types align with SIM_TICK_EVENT_ORDER", () => {
   const order: SimTickEventType[] = [...SIM_TICK_EVENT_ORDER];
   assertEquals(order, [
     "CombatBurst",
+    "Zombots",
     "PlayerDied",
     "Score",
     "GameOver",

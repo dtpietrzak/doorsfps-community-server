@@ -41,6 +41,23 @@ export {
   createRaidTemperamentStep,
   runRaidTemperamentStep,
 } from "./raidTemperament/index.ts";
+export {
+  armMeleeCooldown,
+  readZombieIsDowned,
+  rememberZombieTarget,
+  zombieLastKnown,
+  zombieStickyId,
+  ZOMBIE_TARGET_SWITCH_MARGIN,
+  isZombiePrey,
+  pickZombieTarget,
+  ZOMBIE_MELEE_YAW_TOLERANCE,
+  meleeCooldownTicks,
+  zombieMeleeLunge,
+  ZOMBIE_SEPARATION_RADIUS,
+  zombieSeparationStrafe,
+  zombieLookAt,
+} from "./zombie/index.ts";
+export type { ZombieCrowdBody, ZombiePlayerView } from "./zombie/index.ts";
 
 export type {
   AfterSprintDecision,

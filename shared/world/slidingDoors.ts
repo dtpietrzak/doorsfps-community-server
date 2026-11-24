@@ -69,14 +69,15 @@ export function slidingDoorYaw(
 }
 
 /**
- * Closed-door span on a full wall. `null` when the center is off the wall,
- * the wall is too short to host the opening, or the wall is not full height.
+ * Distance along `a` → `b` of a stored wall-mounted center (doors, gun racks),
+ * or null when the wall is degenerate or the center sits off its line.
+ * Callers check the ends themselves, since each prop has its own width.
  */
-export function slidingDoorPlacement(
+export function wallMountOffset(
   a: { x: number; z: number },
   b: { x: number; z: number },
   center: { x: number; z: number },
-): SlidingDoorPlacement | null {
+): { s: number; len: number } | null {
   const dx = b.x - a.x;
   const dz = b.z - a.z;
   const len = Math.hypot(dx, dz);
@@ -87,6 +88,23 @@ export function slidingDoorPlacement(
   const px = a.x + ux * s;
   const pz = a.z + uz * s;
   if (Math.hypot(center.x - px, center.z - pz) > CENTER_ON_WALL) return null;
+  return { s, len };
+}
+
+/**
+ * Closed-door span on a full wall. `null` when the center is off the wall,
+ * the wall is too short to host the opening, or the wall is not full height.
+ */
+export function slidingDoorPlacement(
+  a: { x: number; z: number },
+  b: { x: number; z: number },
+  center: { x: number; z: number },
+): SlidingDoorPlacement | null {
+  const mount = wallMountOffset(a, b, center);
+  if (!mount) return null;
+  const { s, len } = mount;
+  const ux = (b.x - a.x) / len;
+  const uz = (b.z - a.z) / len;
   const half = SLIDING_DOOR_WIDTH / 2;
   if (s - half < -1e-3 || s + half > len + 1e-3) return null;
   const at = (t: number) => ({ x: a.x + ux * t, z: a.z + uz * t });

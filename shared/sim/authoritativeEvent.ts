@@ -70,6 +70,12 @@ export const AUTHORITATIVE_EVENT_KINDS = [
   "score",
   "gameOver",
   "playerRespawned",
+  /**
+   * Zombots rules outcome that changes the sim outside a shot: a door opens
+   * (collision), a downed player stands up, a rack arms a gun. Never on
+   * other modes (notes/zombots.md step 14).
+   */
+  "zombots",
 ] as const;
 
 export type AuthoritativeEventKind =
@@ -115,6 +121,7 @@ export const AUTHORITATIVE_KIND_CATEGORY: Record<
   score: "simOutcome",
   gameOver: "simOutcome",
   playerRespawned: "simOutcome",
+  zombots: "simOutcome",
 };
 
 /** Stable order within the lifecycle/config category. */
@@ -143,6 +150,7 @@ const SIM_OUTCOME_KIND_ORDER: Record<string, number> = {
   score: 2,
   gameOver: 3,
   playerRespawned: 4,
+  zombots: 5,
 };
 
 /** Finite spawn / pose snapshot recorded on roster ops (Decision 4). */
@@ -435,6 +443,30 @@ export type PlayerRespawnedEvent = {
   player: AuthoritativeRosterSnapshot;
 };
 
+/**
+ * Zombots rules fact (step 14). `doorOpened` drops a door block from
+ * collision, `revived` stands a downed player up at `healthFraction` of max
+ * HP, `armed` adds a gun to the armed set (`refill` = ammo top-up only).
+ */
+export type ZombotsAuthoritativeEvent =
+  | { kind: "zombots"; appliedTick: number; op: "doorOpened"; doorId: string; by: string }
+  | {
+    kind: "zombots";
+    appliedTick: number;
+    op: "revived";
+    playerId: string;
+    by: string;
+    healthFraction: number;
+  }
+  | {
+    kind: "zombots";
+    appliedTick: number;
+    op: "armed";
+    playerId: string;
+    weaponId: number;
+    refill: boolean;
+  };
+
 /** Discriminated union — the only vocabulary for non-input sim mutations. */
 export type AuthoritativeEvent =
   | MatchInitEvent
@@ -455,7 +487,8 @@ export type AuthoritativeEvent =
   | PlayerDiedEvent
   | ScoreEvent
   | GameOverEvent
-  | PlayerRespawnedEvent;
+  | PlayerRespawnedEvent
+  | ZombotsAuthoritativeEvent;
 
 /** Loose constructor / normalize input (unknown JSON). */
 export type AuthoritativeEventInit = Record<string, unknown>;
@@ -1154,6 +1187,54 @@ export function normalizeAuthoritativeEvent(
       const player = normalizeAuthoritativeRosterSnapshot(o.player);
       if (!player) return null;
       return { kind: "playerRespawned", appliedTick, player };
+    }
+    case "zombots":
+      return normalizeZombotsEvent(o, appliedTick);
+    default:
+      return null;
+  }
+}
+
+function nonEmptyString(v: unknown): string | null {
+  return typeof v === "string" && v.length > 0 ? v : null;
+}
+
+function normalizeZombotsEvent(
+  o: Record<string, unknown>,
+  appliedTick: number,
+): ZombotsAuthoritativeEvent | null {
+  switch (o.op) {
+    case "doorOpened": {
+      const doorId = nonEmptyString(o.doorId);
+      const by = nonEmptyString(o.by);
+      if (!doorId || !by) return null;
+      return { kind: "zombots", appliedTick, op: "doorOpened", doorId, by };
+    }
+    case "revived": {
+      const playerId = nonEmptyString(o.playerId);
+      const by = nonEmptyString(o.by);
+      if (!playerId || !by) return null;
+      const f = finiteOr(o.healthFraction, 0);
+      return {
+        kind: "zombots",
+        appliedTick,
+        op: "revived",
+        playerId,
+        by,
+        healthFraction: Math.max(0, Math.min(1, f)),
+      };
+    }
+    case "armed": {
+      const playerId = nonEmptyString(o.playerId);
+      if (!playerId) return null;
+      return {
+        kind: "zombots",
+        appliedTick,
+        op: "armed",
+        playerId,
+        weaponId: Math.trunc(finiteOr(o.weaponId, 0)),
+        refill: asBool(o.refill),
+      };
     }
     default:
       return null;

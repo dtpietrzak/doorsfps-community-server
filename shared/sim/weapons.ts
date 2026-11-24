@@ -95,8 +95,8 @@ export const WEAPON_SWITCH_MS = 550;
 export const PISTOL: WeaponDef = {
   id: WEAPON_PISTOL,
   name: "Pistol",
-  bodyDamage: 30,
-  headDamage: 55,
+  bodyDamage: 25,
+  headDamage: 50,
   fireCooldownMs: 75,
   maxRange: 500,
   magSize: 7,
@@ -108,7 +108,7 @@ export const PISTOL: WeaponDef = {
   // Pistol-whip.
   melee: {
     baseDamage: 50,
-    range: 2.8,
+    range: 2.4,
     cooldownMs: 700,
     swingMs: 450,
     hitMomentT: 0.45,
@@ -119,9 +119,9 @@ export const PISTOL: WeaponDef = {
 export const RIFLE: WeaponDef = {
   id: WEAPON_RIFLE,
   name: "Rifle",
-  bodyDamage: 85,
+  bodyDamage: 95,
   // Fixed ±5 roll produces 100–110 damage.
-  headDamage: 105,
+  headDamage: 150,
   fireCooldownMs: 750,
   maxRange: 1000,
   magSize: 3,
@@ -135,8 +135,8 @@ export const SHOTGUN: WeaponDef = {
   id: WEAPON_SHOTGUN,
   name: "Shotgun",
   // Per pellet. All 7 on body at point blank = 84.
-  bodyDamage: 12,
-  headDamage: 18,
+  bodyDamage: 35,
+  headDamage: 45,
   // Includes the pump.
   fireCooldownMs: 850,
   maxRange: 500,
@@ -150,7 +150,7 @@ export const SHOTGUN: WeaponDef = {
   moveSpeedMult: 0.92,
   pellets: 7,
   // 4.5° × 1.25: wider cone to punish long shots harder.
-  pelletSpreadDeg: 5.625,
+  pelletSpreadDeg: 7,
   // Per pellet: body 12 → 3, head 18 → 4.5 at 50+ units.
   falloff: { fullDamageRange: 8, minDamageRange: 50, minMult: 0.25 },
   // Stock bash.

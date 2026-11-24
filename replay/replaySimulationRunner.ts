@@ -27,6 +27,8 @@
  *             loadoutCommit, teamAssign, matchStart (SIM subset)
  *   deferred: agentRemove of a live agent (post-weapons prune phase),
  *             playerRemove of a connection-issue player (post-MovePhysics)
+ *   post-weapons: zombots (door open, revive, rack arm) — the live runtime
+ *             applies them after the Weapons phase, before MovePhysics
  *   compare-only: combatBurst, playerDied, score, gameOver, playerRespawned,
  *                 matchEnd, matchDraw, matchConfig (loud if match-block disagrees)
  *   ignore: readyVote, connectionStatus
@@ -67,6 +69,11 @@ import type { AuthoritativeCheckpoint } from "./authoritativeCheckpoint.ts";
 import type { CheckpointIndexLookup } from "./checkpointIndex.ts";
 import { loadCheckpointState } from "./checkpointLoading.ts";
 import { assertReplayMayWrite } from "./replayIsolation.ts";
+import {
+  ZOMBOTS_MODE_ID,
+  ZOMBOTS_SIM_RULES,
+} from "../players/zombotsSimRules.ts";
+import type { ZombotsAuthoritativeEvent } from "../shared/sim/authoritativeEvent.ts";
 import type { RecordedInitialState } from "./recordedInitialState.ts";
 import type { RecordedActionRow } from "./recordedTickInputs.ts";
 import type { RecordedTickInputs } from "./recordedTickInputs.ts";
@@ -489,6 +496,29 @@ function applyStructuralEvent(
   }
 }
 
+/**
+ * Re-apply a zombots rules fact the way the live runtime did. Zombie AI and
+ * the rules objects are not rebuilt; their effects on the sim are.
+ */
+function applyZombotsFact(
+  manager: PlayerManager,
+  event: ZombotsAuthoritativeEvent,
+  nowMs: number,
+): void {
+  switch (event.op) {
+    case "doorOpened":
+      manager.getCollision().openSlidingDoor(event.doorId);
+      return;
+    case "revived":
+      manager.revivePlayer(event.playerId, event.healthFraction, nowMs);
+      return;
+    case "armed":
+      if (event.refill) manager.refillPlayerAmmo(event.playerId, event.weaponId);
+      else manager.armPlayer(event.playerId, event.weaponId);
+      return;
+  }
+}
+
 function replayActions(
   manager: PlayerManager,
   tick: number,
@@ -691,6 +721,11 @@ class ReplayRunnerImpl implements ReplayRunner {
 
     this.manager = buildManager(this.collision, init);
     assertReplayMayWrite(this.manager);
+    // A start checkpoint carries the rules flag itself; this covers a
+    // recording armed at match start.
+    if (this.session.initialState.metadata.modeId === ZOMBOTS_MODE_ID) {
+      this.manager.setZombotsRules({ ...ZOMBOTS_SIM_RULES });
+    }
 
     if (startCheckpoint) {
       // Full state at captureTick — recordings usually start mid-match, where
@@ -748,6 +783,7 @@ class ReplayRunnerImpl implements ReplayRunner {
     const captureTick = this.session.initialState.captureTick;
     const removePostWeapons: string[] = [];
     const removePostMove: string[] = [];
+    const zombotsPostWeapons: ZombotsAuthoritativeEvent[] = [];
     for (const event of this.session.eventsAt(tick)) {
       // Facts at or before the capture instant are already in the initial
       // state (e.g. the humanJoin that armed a mid-match recording).
@@ -755,6 +791,10 @@ class ReplayRunnerImpl implements ReplayRunner {
         this.session.initialState.startCheckpoint &&
         event.appliedTick <= captureTick
       ) {
+        continue;
+      }
+      if (event.kind === "zombots") {
+        zombotsPostWeapons.push(event);
         continue;
       }
       const disposition = applyStructuralEvent(this.manager, event, nowMs);
@@ -790,6 +830,9 @@ class ReplayRunnerImpl implements ReplayRunner {
     pruneDeadAgentsLocal(this.manager, tick);
     for (const id of removePostWeapons) {
       if (this.manager.get(id)) this.manager.remove(id);
+    }
+    for (const event of zombotsPostWeapons) {
+      applyZombotsFact(this.manager, event, nowMs);
     }
 
     // 5. MovePhysics + OverlapDeath.

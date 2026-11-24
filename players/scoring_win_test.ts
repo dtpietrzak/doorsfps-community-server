@@ -1,4 +1,4 @@
-import { assertEquals, assertNotEquals } from "jsr:@std/assert@1";
+import { assertEquals } from "jsr:@std/assert@1";
 import type { DoorsMap } from "../world/map.ts";
 import { MapCollision } from "../world/MapCollision.ts";
 import {
@@ -116,19 +116,25 @@ Deno.test("scoring: dead, disconnected, and agent players are excluded", () => {
   assertEquals(agent.score, 0);
 });
 
-Deno.test("scoring: PvP teleport preserves health/stamina and resupplies ammo", () => {
+Deno.test("scoring: PvP teleport preserves health/stamina/current mag and replenishes spare clips", () => {
   const pm = makePm();
   const player = pm.add("runner", "Runner", "A");
+  const fullSpares = player.spareClips;
+  player.markShot(0);
+  pm.handleReload(player.id, 1);
+  pm.update(200);
+  assertEquals(player.spareClips, fullSpares - 1);
+  player.markShot(201);
+  const spentAmmo = player.ammoInMag;
   player.health = 41;
   player.sprintStamina = 17;
-  player.markShot(0);
-  const spentAmmo = player.ammoInMag;
 
-  scoreOnce(pm, player.id, 100);
+  scoreOnce(pm, player.id, 300);
 
   assertEquals(player.health, 41);
   assertEquals(player.sprintStamina, 17);
-  assertNotEquals(player.ammoInMag, spentAmmo);
+  assertEquals(player.ammoInMag, spentAmmo);
+  assertEquals(player.spareClips, fullSpares);
   assertEquals(player.z < -15, true);
 });
 

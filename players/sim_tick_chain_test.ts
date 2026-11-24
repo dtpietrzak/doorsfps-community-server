@@ -95,6 +95,7 @@ function eventTypes(events: ChainEvent[]): string[] {
 Deno.test("SIM_TICK_EVENT_ORDER keeps CombatBurst before PlayerDied … Respawned", () => {
   assertEquals([...SIM_TICK_EVENT_ORDER], [
     "CombatBurst",
+    "Zombots",
     "PlayerDied",
     "Score",
     "GameOver",

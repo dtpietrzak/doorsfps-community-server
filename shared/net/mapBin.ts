@@ -1,5 +1,6 @@
 import { ByteReader, ByteWriter } from "./bytes.ts";
 import { SLIDING_DOOR_COST } from "../world/slidingDoors.ts";
+import { GUN_RACK_WEAPONS, type GunRack } from "../world/gunRacks.ts";
 
 type Vec2 = { x: number; z: number };
 
@@ -56,6 +57,8 @@ export type WireDoorsMap = {
   mirrorMode?: "zombots";
   /** Zombots spawn pad. Written with the zombots flag, including 0. */
   spawnCorner?: CornerId;
+  /** Zombots gun racks. Only written on a zombots map. */
+  gunRacks?: GunRack[];
 };
 
 const EDGE: EdgeId[] = ["south", "east", "north", "west"];
@@ -173,6 +176,9 @@ const MAP_HAS_HINTS = 4;
 const MAP_HAS_WINDOWS = 8;
 const MAP_HAS_DOORS = 16;
 const MAP_HAS_ZOMBOTS = 32;
+const MAP_HAS_GUN_RACKS = 64;
+/** One face byte per rack after the rack list (0 = layout picks, 1, 2 = -1). */
+const MAP_HAS_RACK_FACES = 128;
 
 function doorCostU16(cost: number | undefined): number {
   const value = cost ?? SLIDING_DOOR_COST;
@@ -192,6 +198,14 @@ export function writeMap(w: ByteWriter, map: WireDoorsMap): void {
   if (map.windows && map.windows.length > 0) flags |= MAP_HAS_WINDOWS;
   if (map.doors && map.doors.length > 0) flags |= MAP_HAS_DOORS;
   if (map.mirrorMode === "zombots") flags |= MAP_HAS_ZOMBOTS;
+  // Racks ride on zombots maps only; other maps keep their old bytes.
+  if (
+    map.mirrorMode === "zombots" && map.gunRacks && map.gunRacks.length > 0
+  ) flags |= MAP_HAS_GUN_RACKS;
+  // Only maps that pick a rack side pay for the face bytes.
+  if (
+    (flags & MAP_HAS_GUN_RACKS) && map.gunRacks!.some((rack) => rack.face !== undefined)
+  ) flags |= MAP_HAS_RACK_FACES;
   w.u8(flags);
   w.u8(map.version === 1 ? 1 : 1);
   w.str8(map.name);
@@ -241,6 +255,21 @@ export function writeMap(w: ByteWriter, map: WireDoorsMap): void {
     }
   }
   if (flags & MAP_HAS_ZOMBOTS) w.u8(cornerId(map.spawnCorner ?? 0));
+  if (flags & MAP_HAS_GUN_RACKS) {
+    const racks = map.gunRacks ?? [];
+    w.u8(Math.min(255, racks.length));
+    for (const rack of racks.slice(0, 255)) {
+      w.str8(rack.id);
+      w.str8(rack.wallId);
+      writeVec2(w, rack.center);
+      w.u8(Math.max(0, GUN_RACK_WEAPONS.indexOf(rack.weapon)));
+    }
+    if (flags & MAP_HAS_RACK_FACES) {
+      for (const rack of racks.slice(0, 255)) {
+        w.u8(rack.face === 1 ? 1 : rack.face === -1 ? 2 : 0);
+      }
+    }
+  }
 }
 
 export function readMap(r: ByteReader): WireDoorsMap {
@@ -316,6 +345,25 @@ export function readMap(r: ByteReader): WireDoorsMap {
   if (flags & MAP_HAS_ZOMBOTS) {
     map.mirrorMode = "zombots";
     map.spawnCorner = cornerId(r.u8());
+  }
+  if (flags & MAP_HAS_GUN_RACKS) {
+    const n = r.u8();
+    const racks: GunRack[] = [];
+    for (let i = 0; i < n; i++) {
+      const id = r.str8();
+      const wallId = r.str8();
+      const center = readVec2(r);
+      const weapon = GUN_RACK_WEAPONS[r.u8()] ?? "pistol";
+      racks.push({ id, wallId, center, weapon });
+    }
+    if (flags & MAP_HAS_RACK_FACES) {
+      for (const rack of racks) {
+        const face = r.u8();
+        if (face === 1) rack.face = 1;
+        else if (face === 2) rack.face = -1;
+      }
+    }
+    if (racks.length > 0 && map.mirrorMode === "zombots") map.gunRacks = racks;
   }
   return map;
 }

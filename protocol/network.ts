@@ -10,6 +10,7 @@ import type {
   GlitchSnapState,
 } from "../shared/sim/abilities.ts";
 import type { SkillId } from "../shared/sim/skills.ts";
+import type { ZombotsHudPacket } from "../shared/zombots/zombotsHud.ts";
 import type { MmsRankId } from "../shared/progression/mmsRanks.ts";
 import {
   AFK_KICK_MS,
@@ -335,6 +336,12 @@ export interface SkillLoadoutPacket {
 }
 
 export type { AbilityId, AbilitySnapEntry, GlitchSnapState, SkillId };
+export type {
+  ZombotsFeedEvent,
+  ZombotsHudPacket,
+  ZombotsHudPlayer,
+  ZombotsHudRevive,
+} from "../shared/zombots/zombotsHud.ts";
 
 /** Tick-derived delays — values come from shared/sim/game.ts (ms). */
 export const RESPAWN_DELAY_TICKS = msToTicks(RESPAWN_DELAY_MS);
@@ -408,6 +415,12 @@ export interface PlayerInput {
   meleeLunge?: boolean;
   yaw: number;
   pitch: number;
+  /**
+   * Bundled 60 Hz 1-tick commands (oldest → newest, monotonic sequence).
+   * When present, the server queues unseen frames and consumes 1 per tick.
+   * Top-level fields mirror the newest frame for backward compatibility.
+   */
+  frames?: PlayerInput[];
 }
 
 /**
@@ -585,6 +598,28 @@ export interface SnapshotPlayer {
    * Glitch is not active.
    */
   glitch?: GlitchSnapState;
+  /**
+   * Zombots: at 0 HP and waiting for a revive (`alive` is false). Omitted
+   * otherwise and in every other mode. Wire: the zombots byte after the
+   * weapon byte (shared/net/codec.ts).
+   */
+  downed?: true;
+  /**
+   * Zombots: armed guns as a bitmask (bit `1 << weaponId`); 0 = empty hands.
+   * Omitted when every gun is armed (every other mode). Wire: the zombots
+   * byte after the weapon byte.
+   */
+  armedMask?: number;
+  /**
+   * Zombots: active hardcoded window-crawl animation variant (1 | 2 | 3).
+   * Omitted when not crawling through a window.
+   */
+  windowCrawlVariant?: 1 | 2 | 3;
+  /**
+   * Zombots: normalized progress (0…1) through the active window crawl.
+   * Present only when `windowCrawlVariant` is set.
+   */
+  windowCrawlProgress?: number;
   /**
    * Highest input sequence the server has *stepped* into this pose (A1).
    * Client keeps this cmd and replays only the remaining hold ticks.
@@ -821,6 +856,9 @@ export interface WelcomePacket extends DoorCycleState, MatchClockState {
    * Omitted when unrestricted (bots) or legacy servers.
    */
   skillLoadout?: Array<import("../shared/sim/skills.ts").SkillId | null>;
+  matchKind?: "raid" | "zombots";
+  /** Zombots: the HUD block at join time (no feed events). */
+  zombots?: ZombotsHudPacket;
 }
 
 export interface ShotFiredPacket {
@@ -1063,7 +1101,9 @@ export interface GameOverPacket {
    * Actual XP/coin UI waits for MatchProgression (post DB confirm).
    */
   xpMode?: GameOverXpMode;
-  matchKind?: "raid";
+  matchKind?: "raid" | "zombots";
+  /** Zombots run over: the final HUD block. `wave` is the wave reached. */
+  zombots?: ZombotsHudPacket;
   raid?: {
     door: number;
     goal: number;
@@ -1348,7 +1388,20 @@ export const NetEvents = {
    * and bots until every reserved party member has sent it.
    */
   MapLoaded: "mapLoaded",
+  /**
+   * Server → all (zombots only): wave, purses, doors, revives, and the
+   * rules events since the last one. Sent on change, never on a timer.
+   */
+  ZombotsState: "zombotsState",
+  /**
+   * Client → server (zombots only): E / right click. Same shape as Shoot.
+   * The server picks a revive, a door buy or a rack take from its own pose.
+   */
+  Interact: "interact",
 } as const;
+
+/** Zombots interact request: the client's look, like a shot. */
+export type InteractPacket = ShootPacket;
 
 /**
  * Latency probe payload (server wall-clock ms stamped at send).

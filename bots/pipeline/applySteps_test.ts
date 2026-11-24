@@ -218,3 +218,16 @@ Deno.test("runApplyPipe ability calls handleAbility", () => {
   });
   assertEquals(pm.abilities, [{ ability: "quick", tick: 10 }]);
 });
+
+Deno.test("runApplyPipe enqueues a bot melee swing like a human's Melee", () => {
+  const bot = makeBot();
+  const pm = makePlayers();
+  const ctx = applyCtx(bot, pm);
+  runApplyPipe(DEFAULT_APPLY_STEPS, ctx, {
+    input: { ...stillInput },
+    melee: true,
+  });
+  assertEquals(ctx.weapons.length, 1);
+  assertEquals(ctx.weapons[0]!.kind, "melee");
+  assertEquals(ctx.weapons[0]!.shooterId, bot.playerId);
+});

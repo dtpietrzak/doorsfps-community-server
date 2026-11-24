@@ -127,6 +127,16 @@ Deno.test("door precedence: debug override is above raid and lifecycle locks", (
   assertEquals(pm.getDoorCycleState(tick).doorsOpen, false);
 });
 
+Deno.test("door lifecycle: idle lock stays closed through a live start", () => {
+  const pm = manager();
+  pm.setRaidDoorPolicy("idle");
+  const live = pm.beginLiveMatch(100, 1_000);
+  assertEquals(live.doorsOpen, false);
+  assertEquals(pm.areDoorsOpen(100), false);
+  assertEquals(pm.areDoorsOpen(100 + DOOR_OPEN_TICKS), false);
+  assertEquals(pm.areDoorsOpen(100 + DOOR_FULL_CYCLE_TICKS + 10), false);
+});
+
 Deno.test("door lifecycle: scheduled restart lands in the configured next phase", () => {
   const pm = manager({ enablePrematch: true });
   assertEquals(pm.forceEndMatch(300, "draw", { scheduleRestart: true, restartSeconds: 2 })?.winner, "draw");

@@ -14,6 +14,8 @@ export type ReadyAction = {
   /** Per-sim-tick look for the bot period; last === input look. */
   lookSamples?: BotLookSample[];
   shoot?: boolean;
+  /** One melee swing (ZombieBrain only). */
+  melee?: boolean;
   reload?: boolean;
   weapon?: number;
   ability?: SkillId;

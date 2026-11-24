@@ -14,6 +14,7 @@ import type {
   PlayerDiedPacket,
   ScorePacket,
 } from "../protocol/network.ts";
+import type { ZombotsAuthoritativeEvent } from "../shared/sim/authoritativeEvent.ts";
 import type { ShootOutcome } from "./PlayerManager.ts";
 import type { Player } from "./Player.ts";
 import type { SIM_TICK_EVENT_ORDER } from "./simTickPhases.ts";
@@ -51,8 +52,26 @@ export type SimPlayerRespawnedEvent = {
   readonly player: Player;
 };
 
+/**
+ * Zombots rules fact (notes/zombots.md step 14): the authoritative event
+ * without its envelope. Only the zombots runtime makes these.
+ */
+export type SimZombotsEvent = {
+  readonly type: "Zombots";
+  readonly fact: ZombotsSimFact;
+};
+
+export type ZombotsSimFact = DistributiveOmit<
+  ZombotsAuthoritativeEvent,
+  "kind" | "appliedTick"
+>;
+
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K>
+  : never;
+
 export type SimTickEvent =
   | SimCombatBurstEvent
+  | SimZombotsEvent
   | SimPlayerDiedEvent
   | SimScoreEvent
   | SimGameOverEvent

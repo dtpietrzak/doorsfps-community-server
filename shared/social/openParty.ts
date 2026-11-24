@@ -6,6 +6,7 @@ export type OpenPartyFindModeId = (typeof OPEN_PARTY_FIND_MODE_IDS)[number];
 export const OPEN_PARTY_MODE_IDS = [
   ...OPEN_PARTY_FIND_MODE_IDS,
   "raid",
+  "zombots",
 ] as const;
 export type OpenPartyModeId = (typeof OPEN_PARTY_MODE_IDS)[number];
 

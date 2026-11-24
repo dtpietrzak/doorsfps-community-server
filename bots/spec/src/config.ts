@@ -311,6 +311,12 @@ export type BotBrainConfig = {
    * cohort (2-5s rush, 1-2s pause). `false` → bosses / opt-outs, never pause.
    */
   raidAllowRandomStops?: boolean;
+
+  /**
+   * Zombots horde. When set, {@link createBotBrain} returns the melee brain
+   * instead of the gun brain. Omitted on every other config.
+   */
+  zombie?: true;
 };
 
 /**
@@ -530,4 +536,14 @@ export const RAID_BOT_CONFIG: BotBrainConfig = {
 export const RAID_NO_STOPS_BOT_CONFIG: BotBrainConfig = {
   ...BALANCE_BOT_CONFIG,
   raidAllowRandomStops: false,
+};
+
+/**
+ * Zombots horde. Same nav numbers as the balance filler; the zombie flag
+ * selects the melee brain, which does not read the gun or sprint knobs.
+ */
+export const ZOMBIE_BOT_CONFIG: BotBrainConfig = {
+  ...BALANCE_BOT_CONFIG,
+  id: "zombie",
+  zombie: true,
 };

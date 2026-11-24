@@ -7,7 +7,17 @@ import {
   wallKind,
 } from "./map.ts";
 import { slidingDoorBlock } from "../shared/world/slidingDoors.ts";
-import { authoredWallSpans } from "../shared/world/wallWindows.ts";
+import {
+  collisionWallSpans,
+  WINDOW_PART_PANE,
+  type WindowBody,
+  windowPartPassable,
+} from "../shared/world/wallWindows.ts";
+import {
+  buildWindowCrawlPortals,
+  type WindowCrawlPortal,
+} from "../shared/zombots/windowCrawl.ts";
+import type { MoveCollision } from "../shared/sim/moveStep.ts";
 import {
   DOOR_CLOSED_STANDOFF,
   DOOR_POST_WIDTH,
@@ -70,7 +80,14 @@ export const DOOR_CAPTURE_RADIUS = 0.85;
  */
 const DOOR_WALK_IN_NEAR_DEPTH = PLAYER_RADIUS + 0.55;
 
-type Segment = { a: Vec2; b: Vec2; yMin: number; yMax: number };
+type Segment = {
+  a: Vec2;
+  b: Vec2;
+  yMin: number;
+  yMax: number;
+  /** `WINDOW_PART_*` from wallWindows.ts; absent = no window role. */
+  windowPart?: number;
+};
 type Vec3 = { x: number; y: number; z: number };
 
 export type VerticalRange = { yMin: number; yMax: number };
@@ -142,6 +159,10 @@ export class MapCollision {
   private readonly cellSize = SOLID_GRID_CELL;
   /** Scratch set for unique segment visits during a query. */
   private readonly visitScratch = new Set<number>();
+  /** Closed sliding-door blocks by door id, in map order. */
+  private readonly doorBlocks = new Map<string, Segment[]>();
+  /** Sliding doors opened at runtime, in the order they opened. */
+  private readonly openDoors: string[] = [];
   /**
    * When true, resolvePosition allows a short walk-in past the door plane.
    * Keep false while doors are closed so players don't clip into the sealed
@@ -154,20 +175,33 @@ export class MapCollision {
    * until PlayerManager reseeds from the match seed.
    */
   private spawnRng: SimRngStream;
+  /** Zombots zombie rule for {@link resolvePosition}: windows climbable. */
+  private readonly zombieClimb: boolean;
+  /** Lazily built {@link bodyCollision} views. */
+  private readonly bodyViews: { human?: MoveCollision; zombie?: MoveCollision } = {};
+  /** Lazily built zombots window-crawl portals. */
+  private crawlPortalsCache: readonly WindowCrawlPortal[] | null = null;
 
-  constructor(map: DoorsMap) {
+  /**
+   * `windowBody` picks the window rule plain queries use (default human).
+   * It only matters on zombots maps; see {@link bodyCollision}.
+   */
+  constructor(map: DoorsMap, opts?: { windowBody?: WindowBody }) {
     // Historical process-lifetime seed; PlayerManager.reseedSimRng replaces this
     // with the match `spawn` domain stream on construct / match start.
     this.spawnRng = createSimRng(0x9e3779b9);
     this.map = map;
+    const zombots = map.mirrorMode === "zombots";
+    this.zombieClimb = zombots && opts?.windowBody === "zombie";
     for (const w of map.walls) {
       const range = verticalRangeForKind(wallKind(w));
-      const spans = authoredWallSpans(
+      const spans = collisionWallSpans(
         w,
         map.windows,
         range.yMin,
         range.yMax,
         map.doors,
+        zombots,
       );
       for (const span of spans) {
         this.walls.push({
@@ -175,6 +209,7 @@ export class MapCollision {
           b: { x: span.b.x, z: span.b.z },
           yMin: span.yMin,
           yMax: span.yMax,
+          ...(span.windowPart === 0 ? {} : { windowPart: span.windowPart }),
         });
       }
     }
@@ -183,16 +218,50 @@ export class MapCollision {
       if (!wall) continue;
       const block = slidingDoorBlock(wall, door.center);
       if (!block) continue;
-      this.walls.push({
+      const segment: Segment = {
         a: { x: block.a.x, z: block.a.z },
         b: { x: block.b.x, z: block.b.z },
         yMin: 0,
         yMax: WALL_HEIGHT,
-      });
+      };
+      this.walls.push(segment);
+      const list = this.doorBlocks.get(door.id);
+      if (list) list.push(segment);
+      else this.doorBlocks.set(door.id, [segment]);
     }
     this.buildPerimeterWithDoorGaps();
     this.solids.push(...this.walls, ...this.perimeter);
     this.buildSolidGrid();
+  }
+
+  /**
+   * Zombots: drop a closed sliding door's block so movement, hitscan and
+   * line of sight all pass through it. Returns true only when this call
+   * opened it; unknown or already-open ids change nothing. Remaining
+   * segments keep their order, so replaying {@link openSlidingDoorIds} on a
+   * fresh collision rebuilds the same grid.
+   */
+  public openSlidingDoor(doorId: string): boolean {
+    const blocks = this.doorBlocks.get(doorId);
+    if (!blocks) return false;
+    this.doorBlocks.delete(doorId);
+    this.openDoors.push(doorId);
+    removeSegments(this.walls, blocks);
+    removeSegments(this.solids, blocks);
+    // Indices shift after the splice; a full rebuild is well under a
+    // millisecond on the biggest map (see zombots_test.ts).
+    this.buildSolidGrid();
+    return true;
+  }
+
+  /** True once {@link openSlidingDoor} has opened this door. */
+  public isSlidingDoorOpen(doorId: string): boolean {
+    return this.openDoors.includes(doorId);
+  }
+
+  /** Doors opened at runtime, in open order. Replay these to restore. */
+  public openSlidingDoorIds(): readonly string[] {
+    return this.openDoors.slice();
   }
 
   /**
@@ -281,6 +350,8 @@ export class MapCollision {
 
     let best: number | null = null;
     const consider = (seg: Segment) => {
+      // Panes only stop human bodies; shots and sight go through windows.
+      if (seg.windowPart === WINDOW_PART_PANE) return;
       if (fullOnly && !isFullWallSegment(seg)) return;
       const t = rayThickSegment(
         origin,
@@ -327,6 +398,74 @@ export class MapCollision {
     x: number;
     z: number;
   } {
+    return this.resolveBody(
+      x,
+      z,
+      radius,
+      feetY,
+      headY,
+      halfWallEndInset,
+      this.zombieClimb,
+    );
+  }
+
+  /**
+   * Movement collision for one body kind (notes/zombots.md step 12c). On a
+   * zombots map, `"human"` meets every window as solid wall (no walk, jump,
+   * slide or mantle through) and `"zombie"` climbs the 0.9 m sill with the
+   * header ignored. Elsewhere both are this collision unchanged. Views share
+   * this object's walls and open doors.
+   */
+  public bodyCollision(body: WindowBody): MoveCollision {
+    if (this.map.mirrorMode !== "zombots") return this;
+    const cached = this.bodyViews[body];
+    if (cached) return cached;
+    const climb = body === "zombie";
+    const view: MoveCollision = {
+      resolvePosition: (x, z, radius = PLAYER_RADIUS, feetY = 0, headY) =>
+        this.resolveBody(
+          x,
+          z,
+          radius,
+          feetY,
+          headY ?? feetY + STAND_COLLISION_HEIGHT,
+          0,
+          climb,
+        ),
+      hasHeadroom: (x, z, feetY = 0, headY, radius = PLAYER_RADIUS) => {
+        const resolved = this.resolveBody(
+          x,
+          z,
+          radius,
+          feetY,
+          headY ?? feetY + STAND_COLLISION_HEIGHT,
+          0,
+          climb,
+        );
+        return probeReachable(x, z, resolved.x, resolved.z);
+      },
+    };
+    this.bodyViews[body] = view;
+    return view;
+  }
+
+  /** Zombots window portals a zombie can switch into window-crawl at. */
+  public windowCrawlPortals(): readonly WindowCrawlPortal[] {
+    if (this.crawlPortalsCache === null) {
+      this.crawlPortalsCache = buildWindowCrawlPortals(this.map);
+    }
+    return this.crawlPortalsCache;
+  }
+
+  private resolveBody(
+    x: number,
+    z: number,
+    radius: number,
+    feetY: number,
+    headY: number,
+    halfWallEndInset: number,
+    zombieClimb: boolean,
+  ): { x: number; z: number } {
     let px = x;
     let pz = z;
 
@@ -343,6 +482,10 @@ export class MapCollision {
       pz - pad,
       pz + pad,
       (seg) => {
+        if (
+          seg.windowPart !== undefined &&
+          windowPartPassable(seg.windowPart, zombieClimb)
+        ) return;
         if (!bodyOverlapsSlab(feetY, headY, seg.yMin, seg.yMax)) return;
         let ax = seg.a.x;
         let az = seg.a.z;
@@ -742,6 +885,17 @@ export class MapCollision {
       z: b.minZ,
     }, gaps); // west
   }
+}
+
+/** Remove `drop` from `list` by identity, keeping the rest in order. */
+function removeSegments(list: Segment[], drop: readonly Segment[]): void {
+  let w = 0;
+  for (let r = 0; r < list.length; r++) {
+    const seg = list[r]!;
+    if (drop.includes(seg)) continue;
+    list[w++] = seg;
+  }
+  list.length = w;
 }
 
 /**

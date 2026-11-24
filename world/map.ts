@@ -11,6 +11,8 @@ import {
 } from "../shared/world/doorsMapFormat.ts";
 
 export { MAP_FORMAT_VERSION, type MapFormatVersion };
+export type { GunRack } from "../shared/world/gunRacks.ts";
+import type { GunRack } from "../shared/world/gunRacks.ts";
 
 export type Vec2 = { x: number; z: number };
 
@@ -160,6 +162,8 @@ export type DoorsMap = {
   spawnCorner?: CornerId;
   /** Points where zombots zombies enter. Omitted outside zombots. */
   zombieSpawns?: { id: string; p: Vec2 }[];
+  /** Wall-mounted gun racks. Zombots only; loaders drop them elsewhere. */
+  gunRacks?: GunRack[];
   /**
    * Unique full-wall corner / vertical-edge points for bot nav.
    * Shared endpoints (L/T joints) appear once. Omitted on legacy maps.

@@ -28,7 +28,10 @@ import type {
 } from "../protocol/network.ts";
 import { equipmentFromPlayer } from "../players/authoritativeEventDerive.ts";
 import type { Player } from "../players/Player.ts";
-import type { PlayerManager } from "../players/PlayerManager.ts";
+import type {
+  PlayerManager,
+  ZombotsSimRules,
+} from "../players/PlayerManager.ts";
 import { deepFreeze } from "./recordedInitialState.ts";
 
 /**
@@ -67,6 +70,45 @@ export type CheckpointRaidState =
     readonly failReason: "wipe" | "enemy_capture" | "empty" | "timeout" | null;
   };
 
+/** Per-player zombots sim state (`Player.zombotsState`). */
+export type CheckpointZombotsPlayerState = ReturnType<Player["zombotsState"]>;
+
+/**
+ * Zombots rules objects at the checkpoint (notes/zombots.md step 14), read
+ * from the live runtime. Replay rebuilds have no runtime and omit it; the
+ * sim-relevant part (rules flag, doors, per-player state) is outside it.
+ */
+export type CheckpointZombotsRunState = {
+  readonly phase: "waiting" | "intermission" | "wave" | "over";
+  readonly wave: number;
+  readonly zombiesLeft: number;
+  readonly msUntilNextWave: number;
+  /** Humans in the run, join order. */
+  readonly humans: readonly string[];
+  readonly downed: readonly string[];
+  readonly purses: readonly { readonly id: string; readonly points: number }[];
+  readonly revives: readonly {
+    readonly reviverId: string;
+    readonly targetId: string;
+    readonly presses: number;
+  }[];
+  readonly armed: readonly { readonly id: string; readonly weapons: readonly number[] }[];
+  /** Zombie bot ids alive at the checkpoint, spawn order. */
+  readonly zombies: readonly string[];
+};
+
+/**
+ * Zombots match block. Absent in every other mode, so their checkpoints
+ * keep their shape. Restore opens each door with `openSlidingDoor`; the
+ * result does not depend on order.
+ */
+export type CheckpointZombotsState = {
+  readonly rules: Readonly<ZombotsSimRules>;
+  /** Doors opened this run. Doors never close within a run. */
+  readonly openDoorIds: readonly string[];
+  readonly run?: CheckpointZombotsRunState;
+};
+
 export type CheckpointMatchState = {
   readonly scores: TeamScores;
   readonly matchOver: boolean;
@@ -79,6 +121,8 @@ export type CheckpointMatchState = {
   readonly matchEndTick: number;
   readonly matchDurationTicks: number;
   readonly raid: CheckpointRaidState;
+  /** Zombots only. */
+  readonly zombots?: CheckpointZombotsState;
 };
 
 export type CheckpointWeaponLoadout = {
@@ -199,6 +243,8 @@ export type CheckpointPlayerState = {
   readonly kills: number;
   readonly deaths: number;
   readonly xp: number;
+  /** Zombots only (rules on): armed set, melee override, downed, windows. */
+  readonly zombots?: CheckpointZombotsPlayerState;
 };
 
 /**
@@ -238,7 +284,10 @@ function finiteTickOrNull(tick: number): number | null {
   return Number.isFinite(tick) ? tick : null;
 }
 
-function capturePlayerState(player: Player): CheckpointPlayerState {
+function capturePlayerState(
+  player: Player,
+  zombots: boolean,
+): CheckpointPlayerState {
   const weaponLoadouts: CheckpointWeaponLoadout[] = WEAPON_ORDER.map(
     (weaponId) => ({
       weaponId,
@@ -310,6 +359,7 @@ function capturePlayerState(player: Player): CheckpointPlayerState {
     kills: player.kills,
     deaths: player.deaths,
     xp: player.xp,
+    ...(zombots ? { zombots: player.zombotsState() } : {}),
   };
 }
 
@@ -332,6 +382,8 @@ export function captureCheckpointState(
      * are recorded at `appliedTick <= captureTick`, which playback skips.
      */
     readonly allowPendingEvents?: boolean;
+    /** Zombots rules objects from the live runtime (step 14). */
+    readonly zombotsRun?: CheckpointZombotsRunState;
   },
 ): AuthoritativeCheckpoint {
   if (typeof runtimeMatchId !== "string" || runtimeMatchId.length === 0) {
@@ -352,6 +404,14 @@ export function captureCheckpointState(
   const map = players.getCollision().map;
   const streams = players.getSimRngStreams();
   const collision = players.getCollision();
+  const zombotsRules = players.getZombotsRules();
+  const zombots: CheckpointZombotsState | null = zombotsRules
+    ? {
+      rules: { ...zombotsRules },
+      openDoorIds: [...collision.openSlidingDoorIds()],
+      ...(opts?.zombotsRun ? { run: opts.zombotsRun } : {}),
+    }
+    : null;
 
   const checkpoint: AuthoritativeCheckpoint = {
     schemaVersion: CHECKPOINT_SCHEMA_VERSION,
@@ -378,8 +438,11 @@ export function captureCheckpointState(
       matchEndTick: players.getMatchClockState().matchEndTick,
       matchDurationTicks: players.getMatchDurationTicks(),
       raid,
+      ...(zombots ? { zombots } : {}),
     },
-    players: players.allCached().map(capturePlayerState),
+    players: players.allCached().map((p) =>
+      capturePlayerState(p, zombots !== null)
+    ),
     projectiles: [],
   };
 

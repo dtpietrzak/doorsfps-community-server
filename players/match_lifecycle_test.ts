@@ -367,20 +367,21 @@ Deno.test("lifecycle source-scan: beginRuntimeMatchIdentity call sites are exhau
   const src = stripComments(readRepoSource("runtime/GameServer.ts"));
   const calls = countMatches(src, /this\.beginRuntimeMatchIdentity\s*\(/);
   // changeMap (1), handleMatchReady (1), finishIntermission map-vote and
-  // same-map (2), plus the RaidRuntime dep arrow. Raid activation itself
-  // calls it from RaidRuntime.activateFromJoin, not the host forwarder.
+  // same-map (2), plus the RaidRuntime and ZombotsRuntime dep arrows. Raid
+  // activation calls it from RaidRuntime.activateFromJoin and a new zombots
+  // run from ZombotsRuntime.newRun, not from host forwarders.
   assertEquals(
     calls,
-    5,
-    `expected 5 beginRuntimeMatchIdentity calls, got ${calls}`,
+    6,
+    `expected 6 beginRuntimeMatchIdentity calls, got ${calls}`,
   );
   assertEquals(
     countMatches(
       src,
       /beginRuntimeMatchIdentity:\s*\(tick\)\s*=>\s*this\.beginRuntimeMatchIdentity\s*\(/,
     ),
-    1,
-    "one call is the RaidRuntime wiring arrow",
+    2,
+    "two calls are the RaidRuntime / ZombotsRuntime wiring arrows",
   );
   assertEquals(
     countMatches(methodBody(src, "changeMap"), /this\.beginRuntimeMatchIdentity\s*\(/),

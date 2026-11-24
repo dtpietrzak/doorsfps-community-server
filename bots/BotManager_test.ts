@@ -1,5 +1,9 @@
 import { assert, assertEquals } from "@std/assert";
-import { createBotThinkEngine } from "@doors/bot-engine";
+import {
+  createBotThinkEngine,
+  type BotThinkEngine,
+  type ThinkFrame,
+} from "@doors/bot-engine";
 import {
   BotManager,
   botTickToSimTick,
@@ -1526,4 +1530,68 @@ Deno.test("thinkAll thinks each bot once per bot period (phase shards)", () => {
   assertEquals(thought, botIds.length);
   bots.thinkAll(base, collision);
   assertEquals(bots.getBotThinkMetrics().lastThinkBots, 0);
+});
+
+function recordingEngine(frames: ThinkFrame[]): BotThinkEngine {
+  return {
+    loadMap() {},
+    synchronizeBots() {},
+    think() {
+      return [];
+    },
+    thinkBatch(input) {
+      frames.push(input.frame);
+      return {
+        tick: input.frame.tick,
+        applyTick: input.applyTick,
+        mapRevision: input.frame.mapRevision,
+        decisions: input.bots.map((bot) => ({
+          botId: bot.botId,
+          spawnedAtTick: bot.spawnedAtTick,
+          action: null,
+        })),
+      };
+    },
+  };
+}
+
+Deno.test("think frames omit open doors unless the map is zombots or one is open", () => {
+  const frames: ThinkFrame[] = [];
+  const collision = new MapCollision(testMap());
+  const players = new PlayerManager(collision);
+  const bots = new BotManager(players, {}, {
+    thoughtEngine: recordingEngine(frames),
+    autoFill: false,
+  });
+  bots.setRaidMode(true);
+  bots.setRaidWave(1, "B");
+  thinkAllBotPeriod(bots, 0, collision);
+  assert(frames.length > 0);
+  for (const frame of frames) assertEquals(frame.openSlidingDoorIds, undefined);
+
+  const zombotsCollision = new MapCollision({
+    ...testMap(),
+    name: "Zombots",
+    mirrorMode: "zombots",
+    spawnCorner: 0,
+    walls: [{ id: "w1", a: { x: -4, z: 0 }, b: { x: 4, z: 0 } }],
+    doors: [{ id: "d", wallId: "w1", center: { x: 0, z: 0 }, cost: 500 }],
+  });
+  const zombotsPlayers = new PlayerManager(zombotsCollision);
+  const zombotsFrames: ThinkFrame[] = [];
+  const zombots = new BotManager(zombotsPlayers, {}, {
+    thoughtEngine: recordingEngine(zombotsFrames),
+    autoFill: false,
+  });
+  zombots.setRaidMode(true);
+  zombots.setRaidWave(1, "B");
+  thinkAllBotPeriod(zombots, 0, zombotsCollision);
+  assert(zombotsFrames.length > 0);
+  for (const frame of zombotsFrames) assertEquals(frame.openSlidingDoorIds, []);
+
+  zombotsFrames.length = 0;
+  assertEquals(zombotsCollision.openSlidingDoor("d"), true);
+  thinkAllBotPeriod(zombots, 1, zombotsCollision);
+  assert(zombotsFrames.length > 0);
+  for (const frame of zombotsFrames) assertEquals(frame.openSlidingDoorIds, ["d"]);
 });

@@ -31,6 +31,13 @@ import {
 } from "../protocol/network.ts";
 import type { MapCollision } from "../world/MapCollision.ts";
 import {
+  BODY_PART_LABELS,
+  HEAD_PART_LABELS,
+  LEG_PART_LABELS,
+  type PlayerEquipment,
+  SHOULDER_PART_LABELS,
+} from "../shared/sim/game.ts";
+import {
   type BotBrainConfig as PipelineBotBrainConfig,
   type BotDefinition,
   type BotMapDefinition,
@@ -58,6 +65,7 @@ import {
   COMMUNITY_BOT_CONFIG,
   RAID_BOT_CONFIG,
   RAID_NO_STOPS_BOT_CONFIG,
+  ZOMBIE_BOT_CONFIG,
 } from "./botBrainConfig.ts";
 import { DEFAULT_BOT_DIFFICULTY } from "./difficulty.ts";
 import { botThinksOnSimPhase } from "./helpers/combat.ts";
@@ -154,6 +162,7 @@ function pipelineReadyAction(
         })),
       }),
     ...(action.shoot === undefined ? {} : { shoot: action.shoot }),
+    ...(action.melee === true ? { melee: true } : {}),
     ...(action.reload === undefined ? {} : { reload: action.reload }),
     ...(action.weapon === undefined ? {} : { weapon: action.weapon }),
     ...(isSkillId(action.ability) ? { ability: action.ability } : {}),
@@ -913,7 +922,7 @@ export class BotManager {
    * identity. The count stays the same.
    */
   private swapFillForPool(): void {
-    if (this.pool.length === 0 || this.raidMode) return;
+    if (this.pool.length === 0 || this.directedOnly) return;
     if (this.players.humanCount() > 0) return;
     for (const bot of [...this.bots.values()]) {
       if (this.pool.length === 0) return;
@@ -1096,7 +1105,7 @@ export class BotManager {
    * only while team totals (humans + pool pawns + fillers) are uneven.
    */
   public reconcile(maxPlayers: number): void {
-    if (this.raidMode) return;
+    if (this.directedOnly) return;
     const humans = this.players.humanCount();
 
     // Empty server with default policy: drop offset so bots stay gone.
@@ -1138,7 +1147,7 @@ export class BotManager {
    * Call from the game loop with wall-clock ms. Bot count stays base ± 1.
    */
   public tickChurn(maxPlayers: number, nowMs = this.nowMs()): void {
-    if (!this.churnPolicy) return;
+    if (!this.churnPolicy || this.zombotsMode) return;
     const humans = this.players.humanCount();
     if (humans <= 0 && this.fill.noBotsOnEmptyServer) {
       this.churnOffset = 0;
@@ -1601,6 +1610,101 @@ export class BotManager {
     modelScale: number;
     moveSpeedScale: number;
   } | null = null;
+
+  /** Zombots: only directed zombies, no fill, pool, churn or agents. */
+  private zombotsMode = false;
+  private readonly zombieIds = new Set<string>();
+
+  /** Raid and zombots rosters hold directed bots only. */
+  private get directedOnly(): boolean {
+    return this.raidMode || this.zombotsMode;
+  }
+
+  /**
+   * Zombots slot (notes/zombots.md step 12). Turning it on drops every fill,
+   * balance, pool and agent bot; the runtime spawns zombies directly.
+   */
+  public setZombotsMode(on: boolean): void {
+    this.zombotsMode = on;
+    if (on) {
+      for (const bot of [...this.bots.values()]) {
+        if (!this.zombieIds.has(bot.playerId)) this.removeBotById(bot.playerId, "churn");
+      }
+      this.clearAgents();
+      this.manualExtra = 0;
+      this.churnOffset = 0;
+    } else {
+      this.clearZombies();
+    }
+  }
+
+  /**
+   * One zombie: a directed bot (no team balancing) on the zombie brain, in
+   * the Zombie cosmetic parts through the normal robot render path. It has
+   * no gun (the zombots armed set starts empty), climbs windows, and is
+   * placed at its spawn. Null when the id or name is taken.
+   */
+  public spawnZombie(spec: {
+    id: string;
+    name: string;
+    team: TeamId;
+    x: number;
+    z: number;
+    yaw: number;
+    maxHealth: number;
+    moveSpeedScale: number;
+    modelScale?: number;
+  }): Player | null {
+    if (this.players.get(spec.id) || this.players.isNameTaken(spec.name)) {
+      return null;
+    }
+    const player = this.players.addBot(spec.id, spec.name, {
+      team: spec.team,
+      equipment: zombieEquipment(),
+      ownedAbilities: [],
+      skillLoadout: emptySkillLoadout(),
+      maxHealth: spec.maxHealth,
+      moveSpeedScale: spec.moveSpeedScale,
+      modelScale: spec.modelScale,
+    });
+    player.applySpawn(
+      { x: spec.x, y: PLAYER_HEIGHT, z: spec.z, yaw: spec.yaw },
+      this.players.tick,
+    );
+    // Server movement uses the zombie window rule (step 12c).
+    player.climbsWindows = true;
+    player.setArmedWeapons([]);
+    const managed: ManagedBot = {
+      playerId: player.id,
+      nameIndex: 0,
+      role: "raid",
+      pipelineConfig: ZOMBIE_BOT_CONFIG,
+      sequence: 0,
+      readyDelayQueue: [],
+    };
+    this.bots.set(player.id, managed);
+    this.zombieIds.add(player.id);
+    this.hooks.onBotJoined?.(player);
+    return player;
+  }
+
+  /** Remove one zombie (dead or cleared). False when unknown. */
+  public despawnZombie(id: string): boolean {
+    if (!this.zombieIds.delete(id)) return false;
+    return this.removeBotById(id, "match-end");
+  }
+
+  /**
+   * Drop every zombie. The engine forgets opened doors on its own: the next
+   * run's fresh collision carries a new map revision.
+   */
+  public clearZombies(): void {
+    for (const id of [...this.zombieIds]) this.despawnZombie(id);
+  }
+
+  public zombieCount(): number {
+    return this.zombieIds.size;
+  }
 
   public setRaidMode(on: boolean): void {
     this.raidMode = on;
@@ -2417,7 +2521,7 @@ export class BotManager {
   ): ThinkBatchInput["frame"] {
     const doorCycle = this.players.getDoorCycleState(simTick);
     const teamScores = this.players.getScores();
-    return buildThinkFrame({
+    const frame = buildThinkFrame({
       tick: simTick,
       simDelta: SIM_TICKS_PER_BOT_TICK,
       collision,
@@ -2428,6 +2532,14 @@ export class BotManager {
       teamScoreB: teamScores.B,
       matchOver: this.players.isMatchOver(),
     });
+    // A missing list means every sliding door is still a nav gap. Arenas
+    // omit it. Zombots always sends the open set, including [] while every
+    // door is still shut. A door opened on any map is forwarded too.
+    const openIds = collision.openSlidingDoorIds();
+    if (collision.map.mirrorMode !== "zombots" && openIds.length === 0) {
+      return frame;
+    }
+    return { ...frame, openSlidingDoorIds: openIds };
   }
 
   /** One world + one scheduler shard in, all future actions out. */
@@ -2937,7 +3049,7 @@ export class BotManager {
 
     // Need a real open→closed edge (skip first tick / prematch forever-closed).
     if (prev !== true || doorsOpen !== false) return;
-    if (this.raidMode) return;
+    if (this.directedOnly) return;
     if (this.players.isMatchOver()) return;
     if (this.players.isPrematch()) return;
     if (this.players.humanCount() <= 0) return;
@@ -3270,6 +3382,7 @@ export class BotManager {
     this.lastMoves.delete(playerId);
     this.lastThoughtBotTick.delete(playerId);
     this.raidBotIds.delete(playerId);
+    this.zombieIds.delete(playerId);
     this.players.remove(playerId);
     if (identityId) {
       this.emitPool({
@@ -3311,8 +3424,23 @@ export function brainProfile(managed: ManagedBot): string {
       if (config === AGENT_BOT_CONFIGS.hard) return "agent-hard";
       return "agent-easy";
     case "raid":
+      if (config === ZOMBIE_BOT_CONFIG) return "zombie";
       return config.raidAllowRandomStops === false ? "raid-no-stops" : "raid";
     default:
       return config.id;
   }
+}
+
+/**
+ * The "Zombie" cosmetic parts on every slot that has one: a zombie is a
+ * robot in a costume, drawn by the one robot render path.
+ */
+export function zombieEquipment(): PlayerEquipment {
+  return {
+    ...defaultPlayerEquipment(),
+    head: HEAD_PART_LABELS.indexOf("Zombie"),
+    shoulder: SHOULDER_PART_LABELS.indexOf("Zombie"),
+    body: BODY_PART_LABELS.indexOf("Zombie"),
+    leg: LEG_PART_LABELS.indexOf("Zombie"),
+  };
 }

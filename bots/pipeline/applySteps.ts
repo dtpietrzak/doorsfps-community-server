@@ -54,28 +54,36 @@ const reload: ApplyStep = {
 const shoot: ApplyStep = {
   id: "shoot",
   run(ctx: ApplyContext, action: ReadyAction): void {
-    if (!action.shoot) return;
-
-    const self = ctx.self;
-    const aim = buildShootAimSnapshot(
-      action,
-      { yaw: self.yaw, pitch: self.pitch },
-      ctx.tick,
-    );
-    const packet: ShootPacket = {
-      yaw: aim.yaw,
-      pitch: aim.pitch,
-      clientTick: aim.clientTick,
-      lastAppliedSnapshotTick: aim.lastAppliedSnapshotTick,
-    };
-
-    ctx.enqueueWeapon({
-      kind: "shoot",
-      shooterId: ctx.bot.playerId,
-      packet,
-    });
+    if (action.melee) enqueueBotWeapon(ctx, action, "melee");
+    if (action.shoot) enqueueBotWeapon(ctx, action, "shoot");
   },
 };
+
+/** Same aim snapshot and queue for a shot or a swing (melee reuses the Shoot packet, like a human's). */
+function enqueueBotWeapon(
+  ctx: ApplyContext,
+  action: ReadyAction,
+  kind: "shoot" | "melee",
+): void {
+  const self = ctx.self;
+  const aim = buildShootAimSnapshot(
+    action,
+    { yaw: self.yaw, pitch: self.pitch },
+    ctx.tick,
+  );
+  const packet: ShootPacket = {
+    yaw: aim.yaw,
+    pitch: aim.pitch,
+    clientTick: aim.clientTick,
+    lastAppliedSnapshotTick: aim.lastAppliedSnapshotTick,
+  };
+
+  ctx.enqueueWeapon({
+    kind,
+    shooterId: ctx.bot.playerId,
+    packet,
+  });
+}
 
 const ability: ApplyStep = {
   id: "ability",

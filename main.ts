@@ -336,7 +336,9 @@ async function main() {
     );
   }
 
-  const mapPaths = await listAvailableMapPaths();
+  const mapPaths = await listAvailableMapPaths({
+    zombots: modeId === "zombots",
+  });
   const discoveredMaps: MapCandidate[] = [];
   for (const p of mapPaths) {
     try {

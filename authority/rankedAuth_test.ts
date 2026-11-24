@@ -50,6 +50,14 @@ Deno.test("isOpenOfficialServerId accepts all open authentic ids", () => {
   assertEquals(isOpenOfficialServerId("g00/3", "medium"), true);
 });
 
+Deno.test("isOpenOfficialServerId accepts the co-op occupancies", () => {
+  assertEquals(isOpenOfficialServerId("raid"), true);
+  assertEquals(isOpenOfficialServerId("g00/4", "raid"), true);
+  assertEquals(isOpenOfficialServerId("zombots"), true);
+  assertEquals(isOpenOfficialServerId("g00/5", "zombots"), true);
+  assertEquals(isOpenOfficialServerId("local/5", " ZOMBOTS "), true);
+});
+
 Deno.test("isOpenOfficialServerId rejects ranked and unknown ids", () => {
   assertEquals(isOpenOfficialServerId("ranked"), false);
   assertEquals(isOpenOfficialServerId(""), false);

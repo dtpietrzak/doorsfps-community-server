@@ -272,3 +272,44 @@ Deno.test("raid death: reconnect does not revive an eliminated player", () => {
   assertEquals(restored?.player.alive, false);
   assertEquals(restored?.player.health, 0);
 });
+
+Deno.test("door capture: replenishes spare mags without refilling current mags", () => {
+  const pm = makePm();
+  const scorer = pm.add("p1", "Runner");
+  scorer.team = "A";
+  const fullPistolMag = scorer.ammoInMagFor(0);
+  const fullPistolSpares = scorer.spareClipsFor(0);
+  const fullRifleMag = scorer.ammoInMagFor(1);
+  const fullRifleSpares = scorer.spareClipsFor(1);
+
+  // Fire a round, reload to consume a spare clip, then fire again so both mag & spares are below full.
+  pm.handleShoot(scorer.id, 10, { yaw: 0, pitch: 0, sequence: 1 });
+  assertEquals(scorer.ammoInMagFor(0), fullPistolMag - 1);
+  pm.handleReload(scorer.id, 11);
+  pm.update(200);
+  assertEquals(scorer.spareClipsFor(0), fullPistolSpares - 1);
+  pm.handleShoot(scorer.id, 201, { yaw: 0, pitch: 0, sequence: 2 });
+  assertEquals(scorer.ammoInMagFor(0), fullPistolMag - 1);
+
+  // Switch to rifle, fire + reload + fire so an inactive weapon (pistol) and active weapon (rifle) are both partial.
+  pm.handleWeaponSwitch(scorer.id, 1, 202);
+  pm.update(260);
+  pm.handleShoot(scorer.id, 261, { yaw: 0, pitch: 0, sequence: 3 });
+  pm.handleReload(scorer.id, 262);
+  pm.update(500);
+  assertEquals(scorer.spareClipsFor(1), fullRifleSpares - 1);
+  pm.handleShoot(scorer.id, 501, { yaw: 0, pitch: 0, sequence: 4 });
+  assertEquals(scorer.ammoInMagFor(1), fullRifleMag - 1);
+
+  // Capture the enemy door: spare clips are replenished, current mags stay partial.
+  placeAtEnemyDoor(pm, scorer.id);
+  assertEquals(pm.processScores(510).length, 0);
+  placeAtEnemyDoor(pm, scorer.id);
+  const events = pm.processScores(510 + DOOR_CAPTURE_DWELL_TICKS);
+  assertEquals(events.length, 1);
+
+  assertEquals(scorer.ammoInMagFor(0), fullPistolMag - 1);
+  assertEquals(scorer.spareClipsFor(0), fullPistolSpares);
+  assertEquals(scorer.ammoInMagFor(1), fullRifleMag - 1);
+  assertEquals(scorer.spareClipsFor(1), fullRifleSpares);
+});

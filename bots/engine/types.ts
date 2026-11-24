@@ -4,6 +4,7 @@ import type { MapCollision } from "./world/MapCollision.ts";
 import type { DoorsMap } from "./shared/map.ts";
 import type { SkillId } from "../../shared/sim/skills.ts";
 import type { BotBrainState } from "./pipeline/state.ts";
+import type { ZombieWindowNav } from "./thoughts/zombie/window.ts";
 
 export {
   applyFloatWallDuckPatch,
@@ -61,6 +62,8 @@ export type BotWorldView = {
    * to idle keys (hold look, no movement/combat) — see the gate step.
    */
   matchOver?: boolean;
+  /** Zombots floor nav: windows and chase fields (step 9a). Null elsewhere. */
+  zombieWindows?: ZombieWindowNav | null;
 };
 
 /** One sim tick of look inside a bot period (see {@link BotAction.lookSamples}). */
@@ -76,6 +79,8 @@ export type BotAction = {
    */
   lookSamples?: BotLookSample[];
   shoot?: boolean;
+  /** One melee swing this bot period (zombots zombies). Never set by gun brains. */
+  melee?: boolean;
   reload?: boolean;
   weapon?: number;
   ability?: SkillId;

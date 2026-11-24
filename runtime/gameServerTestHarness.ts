@@ -14,6 +14,7 @@ import type { ReplayIntegrationSink } from "../replay/replayIntegration.ts";
 import type { ReplayRecorder } from "../replay/ReplayRecorder.ts";
 import type { AuthoritativeEvent } from "../shared/sim/authoritativeEvent.ts";
 import { GameServer } from "./GameServer.ts";
+import type { ZombotsRuntime } from "./zombotsRuntime.ts";
 
 const PACKAGE_ROOT = new URL("../", import.meta.url);
 
@@ -66,7 +67,12 @@ export type GameServerInternals = {
   admissionBotReconcileTimer: ReturnType<typeof setTimeout> | null;
   admissionBotPendingParties: Map<string, { partySize: number }>;
   heatmaps: HeatmapTracker;
+  zombotsRuntime: ZombotsRuntime;
 
+  /** The tick driver; tests that never start it stub `tickCount`. */
+  loop: { tickCount: number } | undefined;
+  /** Wires the session handlers onto `sessions` (what start() does). */
+  registerEvents(): void;
   stepSim(tick: number, nowMs: number): SimTickResult;
   deliverReplayIntegrationTick(
     tick: number,
@@ -139,6 +145,24 @@ export type GameServerInternals = {
 
 export function serverInternals(server: GameServer): GameServerInternals {
   return server as unknown as GameServerInternals;
+}
+
+/**
+ * The frame the bot think passes build for this tick (private on
+ * BotManager). Zombots tests read `openSlidingDoorIds` from it.
+ */
+export function botThinkFrame(
+  server: GameServer,
+  tick: number,
+): { openSlidingDoorIds?: readonly string[] } {
+  const internals = serverInternals(server);
+  const bots = internals.bots as unknown as {
+    buildPackageFrame(
+      tick: number,
+      collision: unknown,
+    ): { openSlidingDoorIds?: readonly string[] };
+  };
+  return bots.buildPackageFrame(tick, internals.players.getCollision());
 }
 
 /**

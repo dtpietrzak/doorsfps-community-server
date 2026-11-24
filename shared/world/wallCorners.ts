@@ -704,11 +704,19 @@ function mergeCornerLists(
  * Openings the closure walk removes: windows and sliding doors on full
  * walls, plus both teams' energy-door spans. Zombots seals the energy
  * doors, so those spans are omitted. The yaw graph itself is not cut.
+ *
+ * `openDoorIds` omitted: every sliding door is a gap, which is what
+ * non-zombots callers already assume. A set seals every other door, so
+ * a closed zombots door is solid wall instead of a walk-through.
  */
 export function mapClosureGaps(map: {
   walls: readonly (WallCornerSegment & { id?: string })[];
   windows?: readonly { wallId: string; center: WallCornerPoint }[] | null;
-  doors?: readonly { wallId: string; center: WallCornerPoint }[] | null;
+  doors?: readonly { id?: string; wallId: string; center: WallCornerPoint }[] | null;
+  /**
+   * Sliding doors that count as gaps. Omit for every door. Empty seals them all.
+   */
+  openDoorIds?: ReadonlySet<string> | readonly string[] | null;
   bounds?: WallCornerBounds | null;
   mirrorMode?: string | null;
   teamA?: DoorYawDotSide | null;
@@ -718,6 +726,7 @@ export function mapClosureGaps(map: {
     map.walls,
     map.windows ?? undefined,
     map.doors ?? undefined,
+    map.openDoorIds,
   );
   if (map.mirrorMode === "zombots") return gaps;
   if (!map.bounds || !map.teamA || !map.teamB) return gaps;

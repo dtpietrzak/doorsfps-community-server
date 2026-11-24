@@ -14,6 +14,7 @@ import {
   type AuthoritativeCheckpoint,
   captureCheckpointState,
   type CheckpointRaidState,
+  type CheckpointZombotsRunState,
 } from "../replay/authoritativeCheckpoint.ts";
 import { replayAccessAccountId } from "../replay/replayAccess.ts";
 import { isReplayRecordingEnabled } from "../replay/recordingEnabled.ts";
@@ -34,6 +35,8 @@ export type ReplayTapDeps = {
   /** Current id. GameServer rotates it before {@link ReplayTap.onIdentityRotated}. */
   runtimeMatchId: () => string;
   raidCheckpointState: () => CheckpointRaidState;
+  /** Zombots rules objects (step 14). Omitted / undefined off zombots. */
+  zombotsCheckpointState?: () => CheckpointZombotsRunState | undefined;
   matchMetadata: (tick: number) => MatchMetadataBuildResult;
   createReplayLifecycleClient: () => ReplayLifecycleClient | null;
 };
@@ -120,6 +123,7 @@ export class ReplayTap {
           tick,
           runtimeMatchId,
           this.deps.raidCheckpointState(),
+          this.zombotsOpts(),
         ),
       // Init is read mid-tick; its pending events are already applied state.
       captureStartState: (tick, runtimeMatchId) =>
@@ -128,11 +132,16 @@ export class ReplayTap {
           tick,
           runtimeMatchId,
           this.deps.raidCheckpointState(),
-          { allowPendingEvents: true },
+          { allowPendingEvents: true, ...this.zombotsOpts() },
         ),
     });
     this.recorder.ensureAttached();
     return this.recorder;
+  }
+
+  private zombotsOpts(): { zombotsRun?: CheckpointZombotsRunState } {
+    const run = this.deps.zombotsCheckpointState?.();
+    return run ? { zombotsRun: run } : {};
   }
 
   stopRecorder(): void {
@@ -154,6 +163,7 @@ export class ReplayTap {
       tick,
       this.deps.runtimeMatchId(),
       this.deps.raidCheckpointState(),
+      this.zombotsOpts(),
     );
     const sink = this.sink;
     if (sink) {

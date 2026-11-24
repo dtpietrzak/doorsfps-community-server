@@ -75,6 +75,13 @@ import {
   shellReloadOf,
   spareClipsForWeapon,
 } from "../shared/sim/weapons.ts";
+import {
+  type ArmedWeapons,
+  isWeaponArmedIn,
+  meleeForLoadout,
+  nextArmedWeapon,
+} from "../shared/sim/armedWeapons.ts";
+import type { WeaponMelee } from "../shared/sim/weapons.ts";
 import { RUNTIME_PARTY_SIZE_ABSOLUTE_MAX } from "../shared/social/partyTeamBalance.ts";
 import { CROUCH_EYE_HEIGHT, STAND_EYE_HEIGHT } from "../combat/hitscan.ts";
 import type { MapCollision } from "../world/MapCollision.ts";
@@ -102,6 +109,14 @@ import {
 } from "../shared/sim/playerClip.ts";
 import { playerLandingHitAmount } from "../shared/sim/playerHitVolumes.ts";
 import { wishMoveYaw, yawFromWorldDir } from "../shared/world/yawPole.ts";
+import {
+  cloneWindowCrawlState,
+  stepWindowCrawl,
+  tryStartWindowCrawl,
+  WINDOW_CRAWL_TICKS,
+  type WindowCrawlState,
+  type WindowCrawlVariant,
+} from "../shared/zombots/windowCrawl.ts";
 
 // Re-export mobility contract so tests / callers can import from Player.ts.
 export {
@@ -178,6 +193,11 @@ function defaultLoadouts(): Record<number, WeaponLoadout> {
   return out;
 }
 
+/** Sim ticks between swings for a melee def (null = no swing). */
+function meleeCooldownTicksOf(melee: WeaponMelee | undefined): number | null {
+  return melee ? msToTicks(melee.cooldownMs) : null;
+}
+
 /** Smallest absolute angle between two yaws in radians. */
 function angleDelta(a: number, b: number): number {
   let d = a - b;
@@ -205,6 +225,13 @@ export const POSE_HISTORY_TICKS = msToTicks(POSE_HISTORY_MS);
  * one slot of slack so the oldest sample at the cutoff is still retained.
  */
 const POSE_HISTORY_CAPACITY = POSE_HISTORY_TICKS + 1;
+
+/**
+ * Max buffered 60 Hz 1-tick commands per player (~133 ms). Prevents
+ * speed-bursting or lag-spike buffering exploits: excess oldest ticks are
+ * dropped when a burst exceeds this cap.
+ */
+export const INPUT_QUEUE_MAX_DEPTH = 8;
 
 export type SpawnPose = {
   x: number;
@@ -892,6 +919,33 @@ export class Player {
 
   /** Currently equipped weapon id. */
   public weaponId: number = WEAPON_PISTOL;
+  /**
+   * Zombots armed set (step 12a). Null = every gun armed, the default in
+   * every other mode. While the equipped slot is unarmed the player holds
+   * nothing: no fire or reload, only a fist swing.
+   */
+  private armedWeapons: Set<number> | null = null;
+  /** Zombots: melee base damage replacing the swing's own (zombie waves). */
+  public meleeDamageOverride: number | null = null;
+  /**
+   * Zombots (step 12b): reaching 0 HP leaves this player downed instead of
+   * dead-and-respawning. Off for bots and in every other mode.
+   */
+  public downOnDeath = false;
+  /**
+   * Zombots (steps 9a / 12c): this body climbs windows (a zombie). Movement
+   * goes through `collision.bodyCollision("zombie")`. Off = the plain
+   * collision, where a zombots window is solid wall; other maps don't care.
+   */
+  public climbsWindows = false;
+  /** Active hardcoded zombots window-crawl traversal, or null when walking. */
+  private windowCrawl: WindowCrawlState | null = null;
+  /**
+   * Downed: `alive` is false (so no move, fire, swing, damage or heal, and
+   * look still applies like any dead body) but the player never respawns
+   * until {@link revive} or an explicit {@link respawn} (a new run).
+   */
+  public downed = false;
   /** Per-weapon magazines — full on spawn / score / respawn. */
   private readonly loadouts: Record<number, WeaponLoadout> = defaultLoadouts();
   /**
@@ -983,6 +1037,12 @@ export class Player {
   private abilityNoSpendOnEnd: Partial<Record<SkillId, true>> = {};
 
   private latestInput: PlayerInput | null = null;
+  /**
+   * Bounded FIFO queue of 60 Hz 1-tick commands from bundled Input packets.
+   * Consumed 1 command per sim tick; falls back to repeating `latestInput`
+   * (with edges cleared) if empty.
+   */
+  private inputQueue: PlayerInput[] = [];
   /**
    * Tick-start snapshot of {@link latestInput} for the current/last `update`.
    * Mid-tick arrivals land in `latestInput` for the *next* tick only.
@@ -1077,7 +1137,7 @@ export class Player {
     if (typeof spareClips === "number") slot.spareClips = spareClips;
   }
 
-  /** Full mags + spare clips for every weapon (spawn / score / death respawn). */
+  /** Full mags + spare clips for every weapon (spawn / death respawn). */
   public restoreLoadouts(): void {
     const fresh = defaultLoadouts();
     for (const id of LOADOUT_WEAPON_IDS) {
@@ -1093,6 +1153,23 @@ export class Player {
     }
     this.cancelReload();
     this.cancelWeaponSwitch();
+  }
+
+  /**
+   * Replenish spare clips for every weapon without refilling current magazines
+   * or cancelling active reloads (door capture resupply).
+   */
+  public replenishSpareClips(): void {
+    const fresh = defaultLoadouts();
+    for (const id of LOADOUT_WEAPON_IDS) {
+      const src = fresh[id]!;
+      const slot = this.loadouts[id];
+      if (slot) {
+        slot.spareClips = Math.max(slot.spareClips, src.spareClips);
+      } else {
+        this.loadouts[id] = { ...src };
+      }
+    }
   }
 
   constructor(
@@ -1228,6 +1305,7 @@ export class Player {
     this.connectionIssueDeadlineMs = deadlineMs;
     this.socketId = null;
     this.latestInput = null;
+    this.inputQueue.length = 0;
     this.resetPingStats();
   }
 
@@ -1240,6 +1318,7 @@ export class Player {
     this.connectionIssueDeadlineMs = null;
     this.socketId = socketId;
     this.latestInput = null;
+    this.inputQueue.length = 0;
     this.touchActivity(nowMs);
   }
 
@@ -1325,6 +1404,7 @@ export class Player {
     this.crouch = false;
     this.sprintStamina = SPRINT_DURATION_S;
     this.clearSlide();
+    this.windowCrawl = null;
     this.prevInputCrouch = false;
     this.spawnedAtTick = tick;
     this.poseHistory.clear();
@@ -1339,6 +1419,23 @@ export class Player {
   /** True only for crouch-slide (remote slide pose / PF_SLIDE). */
   public isCrouchSliding(): boolean {
     return this.slideRemaining > 0 && this.slideForceCrouch;
+  }
+
+  /** True while performing a hardcoded zombots window crawl. */
+  public isWindowCrawling(): boolean {
+    return this.windowCrawl !== null;
+  }
+
+  /** Active window-crawl animation variant (1 | 2 | 3), or 0 when not crawling. */
+  public windowCrawlVariant(): WindowCrawlVariant | 0 {
+    return this.windowCrawl ? this.windowCrawl.variant : 0;
+  }
+
+  /** Normalized progress (0…1) through the active window crawl, or 0. */
+  public windowCrawlProgress(): number {
+    return this.windowCrawl
+      ? Math.min(1, this.windowCrawl.tick / WINDOW_CRAWL_TICKS)
+      : 0;
   }
 
   private clearSlide(): void {
@@ -1489,6 +1586,15 @@ export class Player {
 
     const glitch = this.glitchSnapState(tick, glitchCollision ?? null);
     if (glitch) base.glitch = glitch;
+    // Zombots only: both stay off the row (and the wire) in other modes.
+    if (this.downed) base.downed = true;
+    if (this.armedWeapons !== null) base.armedMask = this.armedMask();
+    if (this.windowCrawl !== null) {
+      base.windowCrawlVariant = this.windowCrawl.variant;
+      base.windowCrawlProgress = quantizeStamina(
+        this.windowCrawl.tick / WINDOW_CRAWL_TICKS,
+      );
+    }
 
     // Bot decision tree (spectate Y) — only attach for bots so humans omit.
     if (this.isBot) {
@@ -1629,6 +1735,81 @@ export class Player {
 
   public queueInput(input: PlayerInput, nowMs = Date.now()): void {
     if (this.connectionIssue) return;
+
+    // Phase 2 bundled 60 Hz 1-tick commands: enqueue unseen monotonic frames
+    // into the bounded FIFO queue; server pops 1 per 60 Hz tick.
+    if (Array.isArray(input.frames) && input.frames.length > 0) {
+      if (!this.alive) {
+        const newest = input.frames[input.frames.length - 1]!;
+        if (newest.sequence < this.lastSequence) return;
+        if (this.isMeaningfulInput(newest)) {
+          this.touchActivity(nowMs);
+        }
+        this.lastSequence = newest.sequence;
+        this.yaw = newest.yaw;
+        this.pitch = newest.pitch;
+        this.inputQueue.length = 0;
+        this.lastArrivalInput = {
+          sequence: newest.sequence,
+          forward: newest.forward,
+          backward: newest.backward,
+          left: newest.left,
+          right: newest.right,
+          jump: newest.jump,
+          sprint: newest.sprint,
+          crouch: newest.crouch,
+          ...(newest.meleeLunge ? { meleeLunge: true } : {}),
+          yaw: newest.yaw,
+          pitch: newest.pitch,
+        };
+        return;
+      }
+
+      let acceptedAny = false;
+      let newestAccepted: PlayerInput | null = null;
+      for (const frame of input.frames) {
+        if (frame.sequence <= this.lastSequence) continue;
+        const cmd: PlayerInput = {
+          sequence: frame.sequence,
+          forward: frame.forward,
+          backward: frame.backward,
+          left: frame.left,
+          right: frame.right,
+          jump: frame.jump,
+          sprint: frame.sprint,
+          crouch: frame.crouch,
+          ...(frame.meleeLunge ? { meleeLunge: true } : {}),
+          yaw: frame.yaw,
+          pitch: frame.pitch,
+        };
+        this.inputQueue.push(cmd);
+        this.lastSequence = cmd.sequence;
+        if (this.isMeaningfulInput(cmd)) {
+          this.touchActivity(nowMs);
+        }
+        this.inAccepted += 1;
+        newestAccepted = cmd;
+        acceptedAny = true;
+      }
+      if (!acceptedAny || !newestAccepted) return;
+
+      while (this.inputQueue.length > INPUT_QUEUE_MAX_DEPTH) {
+        this.inputQueue.shift();
+        this.inOverwritten += 1;
+      }
+      if (this.lastInputArrivalMs != null) {
+        this.pushDiagSample(
+          this.inputGapSamples,
+          "gap",
+          nowMs - this.lastInputArrivalMs,
+        );
+      }
+      this.lastInputArrivalMs = nowMs;
+      this.arrivalSinceLastStep = true;
+      this.lastArrivalInput = { ...newestAccepted };
+      return;
+    }
+
     if (input.sequence < this.lastSequence) return;
 
     // Dead: still accept look (and key) activity for AFK, but never move.
@@ -1639,6 +1820,7 @@ export class Player {
       this.lastSequence = input.sequence;
       this.yaw = input.yaw;
       this.pitch = input.pitch;
+      this.inputQueue.length = 0;
       this.lastArrivalInput = { ...input };
       return;
     }
@@ -1646,6 +1828,7 @@ export class Player {
     if (this.isMeaningfulInput(input)) {
       this.touchActivity(nowMs);
     }
+    this.inputQueue.length = 0;
     this.latestInput = input;
     this.lastSequence = input.sequence;
     if (this.lastInputArrivalMs != null) {
@@ -2288,6 +2471,7 @@ export class Player {
     return (
       this.alive &&
       !this.connectionIssue &&
+      this.isWeaponArmed(this.weaponId) &&
       !this.isReloading() &&
       !this.isSwitching(tick) &&
       // Shell guns: every shot needs a finished pump (always true for mags).
@@ -2386,7 +2570,9 @@ export class Player {
    * never touches ammo. No wall-clock reads.
    */
   public canMelee(tick: number): boolean {
-    const cooldownTicks = this.weapon.meleeCooldownTicks;
+    const cooldownTicks = this.armedWeapons === null
+      ? this.weapon.meleeCooldownTicks
+      : meleeCooldownTicksOf(this.meleeDef);
     if (cooldownTicks == null) return false;
     if (this.isAbilityActive("glitch", tick)) return false;
     return (
@@ -2427,6 +2613,7 @@ export class Player {
   public trySwitchWeapon(weaponId: number, tick: number): boolean {
     if (!this.alive || this.connectionIssue) return false;
     if (!isWeaponId(weaponId)) return false;
+    if (!this.isWeaponArmed(weaponId)) return false;
     if (weaponId === this.weaponId) return false;
     if (this.isSwitching(tick)) return false;
 
@@ -2443,12 +2630,180 @@ export class Player {
     return true;
   }
 
-  /** Cycle pistol ↔ rifle (and any future entries in WEAPON_ORDER). */
+  /** Cycle to the next armed weapon in WEAPON_ORDER (unarmed ones skipped). */
   public tryCycleWeapon(tick: number): boolean {
-    const order = WEAPON_ORDER;
-    const idx = order.indexOf(this.weaponId as (typeof order)[number]);
-    const next = order[(idx < 0 ? 0 : idx + 1) % order.length]!;
+    const next = nextArmedWeapon(this.weaponId, this.armedWeapons);
+    if (next === null) return false;
     return this.trySwitchWeapon(next, tick);
+  }
+
+  /** True when `weaponId` is armed (always, outside zombots). */
+  public isWeaponArmed(weaponId: number): boolean {
+    return isWeaponArmedIn(this.armedWeapons, weaponId);
+  }
+
+  /**
+   * Armed set as a bitmask (bit `1 << weaponId`), the snapshot form. Every
+   * bit set when nothing is restricted.
+   */
+  public armedMask(): number {
+    let mask = 0;
+    for (const id of WEAPON_ORDER) {
+      if (this.isWeaponArmed(id)) mask |= 1 << id;
+    }
+    return mask;
+  }
+
+  /**
+   * Zombots per-player sim state for checkpoints (step 14). None of it is in
+   * `CheckpointPlayerState` yet; restore with {@link restoreZombotsState}.
+   */
+  public zombotsState(): {
+    armedMask: number | null;
+    meleeDamageOverride: number | null;
+    downOnDeath: boolean;
+    downed: boolean;
+    climbsWindows: boolean;
+    windowCrawl: WindowCrawlState | null;
+  } {
+    return {
+      armedMask: this.armedWeapons === null ? null : this.armedMask(),
+      meleeDamageOverride: this.meleeDamageOverride,
+      downOnDeath: this.downOnDeath,
+      downed: this.downed,
+      climbsWindows: this.climbsWindows,
+      windowCrawl: cloneWindowCrawlState(this.windowCrawl),
+    };
+  }
+
+  public restoreZombotsState(
+    state: Omit<ReturnType<Player["zombotsState"]>, "windowCrawl"> & {
+      windowCrawl?: WindowCrawlState | null;
+    },
+  ): void {
+    this.setArmedWeapons(
+      state.armedMask === null
+        ? null
+        : WEAPON_ORDER.filter((id) => (state.armedMask! & (1 << id)) !== 0),
+    );
+    this.meleeDamageOverride = state.meleeDamageOverride;
+    this.downOnDeath = state.downOnDeath;
+    this.downed = state.downed;
+    this.climbsWindows = state.climbsWindows;
+    this.windowCrawl = cloneWindowCrawlState(state.windowCrawl ?? null);
+  }
+
+  /** Armed set (null = everything armed). Read-only view. */
+  public getArmedWeapons(): ArmedWeapons {
+    return this.armedWeapons;
+  }
+
+  /**
+   * Replace the armed set. `null` arms everything (the default). Does not
+   * touch ammo or the equipped slot; an unarmed equipped slot means fists.
+   */
+  public setArmedWeapons(ids: Iterable<number> | null): void {
+    if (ids === null) {
+      this.armedWeapons = null;
+      return;
+    }
+    const next = new Set<number>();
+    for (const id of ids) if (isWeaponId(id)) next.add(id);
+    this.armedWeapons = next;
+  }
+
+  /**
+   * Equip a weapon taken or refilled from a rack. Starts a draw/switch when
+   * alive (pausing any reload on the previous gun when switching from one).
+   */
+  private equipRackWeapon(
+    weaponId: number,
+    tick: number,
+    holdingNothing: boolean,
+  ): void {
+    if (!holdingNothing && this.weaponId === weaponId) return;
+    if (this.alive) {
+      if (holdingNothing) this.cancelReload();
+      else this.pauseActiveReload(tick);
+      this.shellReloadNextAtTick = null;
+      this.pumpEndsAtTick = null;
+      this.weaponId = weaponId;
+      this.weaponSwitchEndsAtTick = tick + WEAPON_SWITCH_TICKS;
+    } else {
+      this.weaponId = weaponId;
+    }
+  }
+
+  /**
+   * Arm one gun (zombots rack take). Gives that gun a fresh spawn loadout
+   * (`refill`, default true) and selects it straight away.
+   * Returns false for a bad id or while every gun is already armed (null).
+   */
+  public armWeapon(weaponId: number, tick: number, refill = true): boolean {
+    if (!isWeaponId(weaponId)) return false;
+    if (this.armedWeapons === null) return false;
+    const holdingNothing = !this.isWeaponArmed(this.weaponId);
+    this.armedWeapons.add(weaponId);
+    if (refill) this.resetWeaponLoadout(weaponId);
+    this.equipRackWeapon(weaponId, tick, holdingNothing);
+    return true;
+  }
+
+  /** Fresh spawn ammo (full mag + full spares) for one gun on first take. */
+  private resetWeaponLoadout(weaponId: number): void {
+    if (!isWeaponId(weaponId)) return;
+    const w = WEAPONS[weaponId]!;
+    const slot = this.loadouts[weaponId];
+    const fresh = {
+      ammoInMag: w.magSize,
+      spareClips: spareClipsForWeapon(weaponId),
+      chambered: true,
+    };
+    if (slot) {
+      slot.ammoInMag = fresh.ammoInMag;
+      slot.spareClips = fresh.spareClips;
+      slot.chambered = true;
+    } else {
+      this.loadouts[weaponId] = fresh;
+    }
+    delete this.pausedReloadRemainingTicks[weaponId];
+    if (weaponId === this.weaponId) {
+      this.reloadEndsAtTick = null;
+      this.shellReloadNextAtTick = null;
+      this.pumpEndsAtTick = null;
+    }
+  }
+
+  /**
+   * Replenish spare clips for one gun without refilling the current magazine
+   * (zombots rack refill). When `tick` is passed, also selects that gun if it
+   * isn't already equipped.
+   */
+  public refillWeapon(weaponId: number, tick?: number): void {
+    if (!isWeaponId(weaponId)) return;
+    const w = WEAPONS[weaponId]!;
+    const spares = spareClipsForWeapon(weaponId);
+    const slot = this.loadouts[weaponId];
+    if (slot) {
+      slot.spareClips = Math.max(slot.spareClips, spares);
+    } else {
+      this.loadouts[weaponId] = {
+        ammoInMag: w.magSize,
+        spareClips: spares,
+        chambered: true,
+      };
+    }
+    if (weaponId !== this.weaponId && tick !== undefined) {
+      this.equipRackWeapon(weaponId, tick, !this.isWeaponArmed(this.weaponId));
+    }
+  }
+
+  /**
+   * The swing this player makes right now: the equipped gun's melee, or
+   * the fist while holding nothing. Undefined = this gun zooms instead.
+   */
+  public get meleeDef(): WeaponMelee | undefined {
+    return meleeForLoadout(this.weapon, this.armedWeapons);
   }
 
   /**
@@ -2459,6 +2814,7 @@ export class Player {
    */
   public tryBeginReload(tick: number): boolean {
     if (!this.alive || this.connectionIssue) return false;
+    if (!this.isWeaponArmed(this.weaponId)) return false;
     if (this.isSwitching(tick)) return false;
     if (this.isReloading()) return false;
     const w = this.weapon;
@@ -2687,7 +3043,9 @@ export class Player {
     this.alive = false;
     this.health = 0;
     this.diedAtTick = tick;
+    if (this.downOnDeath) this.downed = true;
     this.latestInput = null;
+    this.inputQueue.length = 0;
     this.velocityX = 0;
     this.velocityY = 0;
     this.velocityZ = 0;
@@ -2697,6 +3055,7 @@ export class Player {
     this.lockAbilityChargesUntilDoor();
     // Stand up on death so corpse / death flop uses full height.
     this.clearSlide();
+    this.windowCrawl = null;
     this.prevInputCrouch = false;
     this.clearHitSlow();
     if (this.crouch) {
@@ -2867,6 +3226,7 @@ export class Player {
 
     // Input-arrival defaults (Decision 4 — next-tick-owned, not in frame).
     this.latestInput = null;
+    this.inputQueue.length = 0;
     this.selectedInputForTick = null;
     this.lastTickSelection = null;
     this.arrivalSinceLastStep = false;
@@ -2891,6 +3251,8 @@ export class Player {
   ): boolean {
     // Hold respawn while connection is down — restore on reclaim instead.
     if (this.connectionIssue) return false;
+    // Zombots: the only way back from downed is a revive.
+    if (this.downed) return false;
     return (
       !this.alive &&
       this.diedAtTick !== null &&
@@ -2907,8 +3269,10 @@ export class Player {
     this.clearHitSlow();
     this.health = this.maxHealth;
     this.alive = true;
+    this.downed = false;
     this.diedAtTick = null;
     this.latestInput = null;
+    this.inputQueue.length = 0;
     if (wasAfkWhileDead === false) {
       this.touchActivity();
     }
@@ -2917,9 +3281,36 @@ export class Player {
   }
 
   /**
+   * Zombots revive (step 12b): stand a downed player back up where they lie
+   * at `healthFraction` of max HP (at least 1). No teleport, no spawn
+   * protection, ammo and armed set kept. Returns false unless downed.
+   */
+  public revive(healthFraction: number, tick: number, nowMs: number): boolean {
+    if (!this.downed) return false;
+    const fraction = Number.isFinite(healthFraction)
+      ? Math.max(0, Math.min(1, healthFraction))
+      : 0;
+    const wasAfkWhileDead = this.afkWhileDead;
+    this.afkWhileDead = null;
+    this.downed = false;
+    this.alive = true;
+    this.health = Math.max(1, Math.round(this.maxHealth * fraction));
+    this.diedAtTick = null;
+    this.latestInput = null;
+    this.inputQueue.length = 0;
+    this.velocityX = 0;
+    this.velocityZ = 0;
+    this.clearHitSlow();
+    this.recordPose(tick);
+    if (wasAfkWhileDead === false) this.touchActivity(nowMs);
+    return true;
+  }
+
+  /**
    * Door capture: teleport to own door (portal-mapped xz + yaw, copied pitch)
-   * with spawn protection and resupply ammo. Health and sprint stamina are
-   * preserved (unlike death respawn, which uses corner spawn points).
+   * with spawn protection and replenish spare clips (loaded mags are kept).
+   * Health and sprint stamina are preserved (unlike death respawn, which uses
+   * corner spawn points).
    */
   public sendHomeAfterScore(spawn: SpawnPose, tick: number): void {
     const health = this.health;
@@ -2930,7 +3321,8 @@ export class Player {
     this.alive = true;
     this.diedAtTick = null;
     this.latestInput = null;
-    this.restoreLoadouts();
+    this.inputQueue.length = 0;
+    this.replenishSpareClips();
     // Door capture regenerates spent ability charges (1s window).
     this.beginAbilityDoorRegen(tick);
   }
@@ -2962,6 +3354,7 @@ export class Player {
   ): boolean {
     this.lastOverlapOof = false;
     if (!this.alive) {
+      this.inputQueue.length = 0;
       // Ability timers still advance while dead (charges persist; lock expires).
       this.tickAbilityCharges(tick);
       const prevY = this.y;
@@ -2984,6 +3377,7 @@ export class Player {
     if (this.connectionIssue) {
       this.tickAbilityCharges(tick);
       this.latestInput = null;
+      this.inputQueue.length = 0;
       this.selectedInputForTick = null;
       this.velocityX = 0;
       this.velocityZ = 0;
@@ -2992,14 +3386,26 @@ export class Player {
       return false;
     }
 
-    // Epic 5.2: pin the tick's input at update start. Mid-tick arrivals update
-    // latestInput for the *next* tick only; movement steps from this snapshot.
-    this.selectedInputForTick = this.latestInput;
+    // Epic 5.2 + Phase 2: pop 1 queued 60 Hz command if available; otherwise
+    // pin latestInput (legacy hold or repeat_missing on queue starvation).
+    let fromQueue = false;
+    let arrivalSinceLastStep: boolean;
+    if (this.inputQueue.length > 0) {
+      const queued = this.inputQueue.shift()!;
+      this.latestInput = queued;
+      this.yaw = queued.yaw;
+      this.pitch = queued.pitch;
+      this.selectedInputForTick = queued;
+      arrivalSinceLastStep = true;
+      fromQueue = true;
+    } else {
+      this.selectedInputForTick = this.latestInput;
+      arrivalSinceLastStep = this.arrivalSinceLastStep;
+    }
     const input = this.selectedInputForTick;
     // Recording snapshot is tick-start (pre edge-consume). consumeWireMovementEdges
     // mutates the live packet so held sequences cannot double-fire jump/melee.
     const recordedInput = input === null ? null : { ...input };
-    const arrivalSinceLastStep = this.arrivalSinceLastStep;
 
     this.tickWeaponSwitch(tick);
     this.tickReload(tick);
@@ -3042,35 +3448,113 @@ export class Player {
       prevInputCrouch: this.prevInputCrouch,
     };
 
-    // Quick (PR2): stall all stamina spend while the window is active.
-    const stallStaminaSpend = this.isAbilityActive("quick", tick);
+    // Zombots hardcoded window crawl: when a zombie walks up to a window and
+    // pushes toward it, switch into window crawl (one of 3 animations) and
+    // land back in normal standing locomotion on the inside.
+    if (
+      this.climbsWindows &&
+      this.windowCrawl === null &&
+      this.onGround &&
+      moveInput !== null
+    ) {
+      const portals = collision.windowCrawlPortals();
+      if (portals.length > 0) {
+        const sin = Math.sin(moveInput.yaw);
+        const cos = Math.cos(moveInput.yaw);
+        let mx = 0;
+        let mz = 0;
+        if (moveInput.forward) {
+          mx -= sin;
+          mz -= cos;
+        }
+        if (moveInput.backward) {
+          mx += sin;
+          mz += cos;
+        }
+        if (moveInput.left) {
+          mx -= cos;
+          mz += sin;
+        }
+        if (moveInput.right) {
+          mx += cos;
+          mz -= sin;
+        }
+        const len = Math.hypot(mx, mz);
+        if (len > 1e-6) {
+          const started = tryStartWindowCrawl(
+            portals,
+            { x: this.x, z: this.z },
+            { x: mx / len, z: mz / len },
+            this.id,
+            tick,
+          );
+          if (started !== null) {
+            this.windowCrawl = started;
+            this.clearSlide();
+            this.crouch = false;
+            this.velocityY = 0;
+          }
+        }
+      }
+    }
 
-    const { state: after, jumped, meleeLungeStarted } = stepMove(
-      before,
-      moveInput,
-      collision,
-      {
-        dt: DT,
-        weaponMoveMult: this.weapon.moveSpeedMult,
-        moveSpeedScale: this.moveSpeedScale *
-          hitSlowMoveSpeedScale(this.activeHitSlowStacks(tick)),
-        stallStaminaSpend,
-      },
-    );
+    let jumped = false;
+    let meleeLungeStarted = false;
+    const crawling = this.windowCrawl !== null;
+    if (this.windowCrawl !== null) {
+      const stepped = stepWindowCrawl(this.windowCrawl);
+      this.x = stepped.pose.x;
+      this.y = stepped.pose.y;
+      this.z = stepped.pose.z;
+      this.yaw = stepped.pose.yaw;
+      this.pitch = stepped.pose.pitch;
+      this.velocityY = (this.y - prevY) / DT;
+      this.onGround = stepped.pose.onGround;
+      this.crouch = false;
+      this.clearSlide();
+      if (stepped.done) {
+        this.windowCrawl = null;
+        this.onGround = true;
+        this.velocityY = 0;
+      }
+    } else {
+      // Quick (PR2): stall all stamina spend while the window is active.
+      const stallStaminaSpend = this.isAbilityActive("quick", tick);
 
-    this.x = after.x;
-    this.y = after.y;
-    this.z = after.z;
-    this.velocityY = after.velocityY;
-    this.onGround = after.onGround;
-    if (!before.onGround && after.onGround) this.lastLandedAtTick = tick;
-    this.crouch = after.crouch;
-    this.sprintStamina = after.sprintStamina;
-    this.slideRemaining = after.slideRemaining;
-    this.slideDirX = after.slideDirX;
-    this.slideDirZ = after.slideDirZ;
-    this.slideForceCrouch = after.slideForceCrouch;
-    this.prevInputCrouch = after.prevInputCrouch;
+      // Zombots window rule (12c): humans meet windows as wall, zombies climb.
+      const body = this.climbsWindows
+        ? collision.bodyCollision("zombie")
+        : collision;
+      const moved = stepMove(
+        before,
+        moveInput,
+        body,
+        {
+          dt: DT,
+          weaponMoveMult: this.weapon.moveSpeedMult,
+          moveSpeedScale: this.moveSpeedScale *
+            hitSlowMoveSpeedScale(this.activeHitSlowStacks(tick)),
+          stallStaminaSpend,
+        },
+      );
+      const after = moved.state;
+      jumped = moved.jumped;
+      meleeLungeStarted = moved.meleeLungeStarted;
+
+      this.x = after.x;
+      this.y = after.y;
+      this.z = after.z;
+      this.velocityY = after.velocityY;
+      this.onGround = after.onGround;
+      if (!before.onGround && after.onGround) this.lastLandedAtTick = tick;
+      this.crouch = after.crouch;
+      this.sprintStamina = after.sprintStamina;
+      this.slideRemaining = after.slideRemaining;
+      this.slideDirX = after.slideDirX;
+      this.slideDirZ = after.slideDirZ;
+      this.slideForceCrouch = after.slideForceCrouch;
+      this.prevInputCrouch = after.prevInputCrouch;
+    }
 
     // A1: track how long the current sequence has been integrated.
     let sequenceChanged = false;
@@ -3085,11 +3569,18 @@ export class Player {
     }
 
     // Jump / melee lunge are one-shot on the held input packet (epic 5.2).
+    // Queued 1-tick commands clear edges unconditionally so starvation repeats
+    // held movement without refiring a stale jump/meleeLunge.
     if (input) {
-      consumeWireMovementEdges(input, { jumped, meleeLungeStarted });
+      if (fromQueue) {
+        input.jump = false;
+        input.meleeLunge = false;
+      } else {
+        consumeWireMovementEdges(input, { jumped, meleeLungeStarted });
+      }
     }
 
-    if (obstacles.length > 0) {
+    if (obstacles.length > 0 && !crawling) {
       const clip = applyPlayerClip(
         collision,
         {

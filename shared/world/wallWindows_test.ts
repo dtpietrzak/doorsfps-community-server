@@ -171,3 +171,26 @@ Deno.test("a sliding door that covers a short wall is the whole wall", () => {
   assertAlmostEquals(gaps[0]!.a.x, -0.4, 1e-6);
   assertAlmostEquals(gaps[0]!.b.x, 0.4, 1e-6);
 });
+
+Deno.test("a closed sliding door is not a gap until its id is open", () => {
+  const wall = { id: "w", a, b };
+  const door = { id: "d", wallId: "w", center };
+  const open = interiorOpeningGaps([wall], undefined, [door]);
+  const named = interiorOpeningGaps([wall], undefined, [door], ["d"]);
+  const sealed = interiorOpeningGaps([wall], undefined, [door], []);
+  const other = interiorOpeningGaps([wall], undefined, [door], ["nope"]);
+  assertEquals(named, open);
+  assertEquals(sealed, []);
+  assertEquals(other, []);
+  // No id: still a gap when the caller does not pass a set.
+  const legacy = interiorOpeningGaps(
+    [wall],
+    undefined,
+    [{ wallId: "w", center }],
+  );
+  assertEquals(legacy.length, 1);
+  assertEquals(
+    interiorOpeningGaps([wall], undefined, [{ wallId: "w", center }], []),
+    [],
+  );
+});

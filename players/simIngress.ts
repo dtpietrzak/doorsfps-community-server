@@ -55,12 +55,10 @@ export type SimIngressSinks = {
   volDropPctFor?: (playerId: string) => number | undefined;
 };
 
-/**
- * Parse live `NetEvents.Input` bytes.
- * Rejects non-objects and non-numeric sequence/yaw/pitch; boolean-coerces keys.
- * Does not wrap/clamp look. `meleeLunge` is passed through when truthy.
- */
-export function parsePlayerInput(raw: unknown): PlayerInput | null {
+/** Cap on bundled 1-tick frames accepted per NetEvents.Input packet. */
+const INPUT_BUNDLE_MAX_FRAMES = 16;
+
+function parseSinglePlayerInput(raw: unknown): PlayerInput | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
 
@@ -81,6 +79,30 @@ export function parsePlayerInput(raw: unknown): PlayerInput | null {
   };
   // One-shot edge; absent unless armed (same convention as the bot adapter).
   if (o.meleeLunge) parsed.meleeLunge = true;
+  return parsed;
+}
+
+/**
+ * Parse live `NetEvents.Input` bytes.
+ * Rejects non-objects and non-numeric sequence/yaw/pitch; boolean-coerces keys.
+ * Does not wrap/clamp look. `meleeLunge` is passed through when truthy.
+ * Optional `frames` carries bundled 60 Hz 1-tick commands (oldest → newest).
+ */
+export function parsePlayerInput(raw: unknown): PlayerInput | null {
+  const parsed = parseSinglePlayerInput(raw);
+  if (!parsed) return null;
+  const o = raw as Record<string, unknown>;
+  if (Array.isArray(o.frames) && o.frames.length > 0) {
+    const frames: PlayerInput[] = [];
+    const start = Math.max(0, o.frames.length - INPUT_BUNDLE_MAX_FRAMES);
+    for (let i = start; i < o.frames.length; i++) {
+      const f = parseSinglePlayerInput(o.frames[i]);
+      if (f) frames.push(f);
+    }
+    if (frames.length > 0) {
+      parsed.frames = frames;
+    }
+  }
   return parsed;
 }
 

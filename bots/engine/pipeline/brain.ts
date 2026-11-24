@@ -141,6 +141,7 @@ import type { BotBrainConfig } from "../config.ts";
 import type { ThinkContext } from "./types.ts";
 import type {
   BotAction,
+  BotBrain as ThinkBrain,
   BotBrainState,
   BotWorldView,
 } from "../types.ts";
@@ -173,6 +174,7 @@ import {
   runYawPoleStep,
 } from "../thoughts/index.ts";
 import { clamp, clamp01, max, RAD_PER_DEG } from "../math/index.ts";
+import { ZombieBrain } from "./zombieBrain.ts";
 import {
   defaultBrainHooks,
   type BrainHooks,
@@ -672,9 +674,11 @@ export class BotBrain {
   }
 }
 
+/** Gun brain, or the zombots melee brain when `config.zombie` is set. */
 export function createBotBrain(
   config: BotBrainConfig,
   opts?: { rng?: () => number; hooks?: BrainHooks },
-): BotBrain {
+): ThinkBrain {
+  if (config.zombie === true) return new ZombieBrain(config, opts);
   return new BotBrain(config, opts);
 }

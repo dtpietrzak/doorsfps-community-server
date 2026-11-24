@@ -43,6 +43,8 @@ export interface Player {
   skills: readonly SkillSnapshot[];
   unlimitedAmmo: boolean;
   strength?: number;
+  /** Zombots downed human (see PlayerSnapshot.isDowned). Missing = standing. */
+  isDowned?: boolean;
 }
 
 /** Current horizontal movement yaw used by navigation FOV scoring. */

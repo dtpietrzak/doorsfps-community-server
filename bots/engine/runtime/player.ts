@@ -37,5 +37,7 @@ export function runtimePlayer(source: PlayerSnapshot): Player {
     skills: source.skills,
     unlimitedAmmo: source.unlimitedAmmo === true,
     strength: undefined,
+    // Only downed zombots humans carry the field.
+    ...(source.isDowned === true ? { isDowned: true } : {}),
   };
 }

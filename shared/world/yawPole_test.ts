@@ -86,6 +86,41 @@ Deno.test("polesForTeam: enemy door poles only for team A → B door", () => {
   assertEquals(wallPoles.length, 0);
 });
 
+Deno.test("splitYawPoles: a closed sliding door is not a gap", () => {
+  const bounds = { minX: -20, maxX: 20, minZ: -20, maxZ: 20 };
+  const map: YawPoleMap = {
+    bounds,
+    teamA: { edge: "south", doorHalfWidth: 2.5 },
+    teamB: { edge: "north", doorHalfWidth: 2.5 },
+    wallCorners: [],
+    mirrorMode: "zombots",
+    walls: [
+      { id: "s", a: { x: 0, z: 0 }, b: { x: 6, z: 0 }, kind: "full" },
+      { id: "e", a: { x: 6, z: 0 }, b: { x: 6, z: 6 }, kind: "full" },
+      { id: "n", a: { x: 6, z: 6 }, b: { x: 0, z: 6 }, kind: "full" },
+      { id: "w", a: { x: 0, z: 6 }, b: { x: 0, z: 0 }, kind: "full" },
+      { id: "stub", a: { x: 3, z: 0 }, b: { x: 3, z: 2 }, kind: "full" },
+    ],
+    doors: [{ id: "d", wallId: "n", center: { x: 3, z: 6 } }],
+  };
+  const same = (
+    left: readonly { x: number; z: number }[],
+    right: readonly { x: number; z: number }[],
+  ) => {
+    if (left.length !== right.length) return false;
+    for (let i = 0; i < left.length; i++) {
+      if (left[i]!.x !== right[i]!.x || left[i]!.z !== right[i]!.z) return false;
+    }
+    return true;
+  };
+  const open = splitYawPoles(map);
+  const named = splitYawPoles({ ...map, openSlidingDoorIds: ["d"] });
+  const sealed = splitYawPoles({ ...map, openSlidingDoorIds: [] });
+  assertEquals(same(named.wallPoles, open.wallPoles), true);
+  assertEquals(same(sealed.wallPoles, open.wallPoles), false);
+  assertEquals(sealed.doorPolesA.length, open.doorPolesA.length);
+});
+
 Deno.test("splitYawPoles: strips baked door keys from wall list", () => {
   const map = openMap();
   const all = computeDoorYawDots(map.bounds, map.teamA!, map.teamB!);

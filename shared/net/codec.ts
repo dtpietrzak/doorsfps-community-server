@@ -112,9 +112,23 @@ const PF_FOUNDER = 1 << 29;
 const PF_AFK_KICK = 1 << 30;
 const PF_ABILITY_META = 1 << 31;
 
-// Weapon byte (under PF_WEAPON): low 7 bits = weapon id, bit 7 = pumping.
-const WEAPON_BYTE_ID_MASK = 0x7f;
+// Weapon byte (under PF_WEAPON): low 6 bits = weapon id, bit 7 = pumping,
+// bit 6 = a zombots byte follows. Weapon ids are tiny, so bit 6 was always 0
+// and every non-zombots row keeps its bytes.
+const WEAPON_BYTE_ID_MASK = 0x3f;
+const WEAPON_BYTE_ZOMBOTS = 0x40;
 const WEAPON_BYTE_PUMPING = 0x80;
+/** Weapon id written when only the zombots byte needs the weapon byte. */
+const WEAPON_BYTE_NO_WEAPON = 0x3f;
+// Zombots byte: bit 0 = downed, bit 1 = armed mask present, bits 2–6 = mask,
+// bit 7 = window-crawl byte follows (bits 6–7 = variant 1..3, bits 0–5 = 0..63 progress).
+const ZB_DOWNED = 0x01;
+const ZB_ARMED = 0x02;
+const ZB_ARMED_SHIFT = 2;
+const ZB_ARMED_MASK = 0x1f;
+const ZB_WINDOW_CRAWL = 0x80;
+const CRAWL_VARIANT_SHIFT = 6;
+const CRAWL_PROGRESS_MASK = 0x3f;
 
 type AbilityEntry = {
   id: string;
@@ -195,6 +209,14 @@ export type WireSnapshotPlayer = {
   crosshairColor?: number;
   /** Own name tag hue shift -2…2 off team color. */
   nameHue?: number;
+  /** Zombots: waiting for a revive. Rides the zombots byte. */
+  downed?: true;
+  /** Zombots: armed guns, bit `1 << weaponId`. Rides the zombots byte. */
+  armedMask?: number;
+  /** Zombots: active hardcoded window-crawl animation variant (1 | 2 | 3). */
+  windowCrawlVariant?: 1 | 2 | 3;
+  /** Zombots: normalized progress (0…1) through the active window crawl. */
+  windowCrawlProgress?: number;
 };
 
 function writePlayer(w: ByteWriter, p: WireSnapshotPlayer): void {
@@ -218,7 +240,16 @@ function writePlayer(w: ByteWriter, p: WireSnapshotPlayer): void {
   if (p.velocityX != null || p.velocityY != null || p.velocityZ != null) {
     flags |= PF_VEL_XYZ;
   }
-  if (p.weapon != null || p.pumping) flags |= PF_WEAPON;
+  const crawlVariant = p.windowCrawlVariant === 1 || p.windowCrawlVariant === 2 ||
+      p.windowCrawlVariant === 3
+    ? p.windowCrawlVariant
+    : 0;
+  const zombotsByte = (p.downed ? ZB_DOWNED : 0) |
+    (p.armedMask != null
+      ? ZB_ARMED | ((p.armedMask & ZB_ARMED_MASK) << ZB_ARMED_SHIFT)
+      : 0) |
+    (crawlVariant !== 0 ? ZB_WINDOW_CRAWL : 0);
+  if (p.weapon != null || p.pumping || zombotsByte !== 0) flags |= PF_WEAPON;
   if (p.ammoInMag != null || p.spareClips != null) flags |= PF_AMMO;
   if (p.sprintStamina != null) flags |= PF_STAMINA;
   if (p.abilities && p.abilities.length > 0) flags |= PF_ABILITIES;
@@ -289,8 +320,23 @@ function writePlayer(w: ByteWriter, p: WireSnapshotPlayer): void {
     w.i16(toCenti(p.velocityZ ?? 0));
   }
   if (flags & PF_WEAPON) {
-    w.u8(((p.weapon ?? 0) & WEAPON_BYTE_ID_MASK) |
-      (p.pumping ? WEAPON_BYTE_PUMPING : 0));
+    const id = p.weapon ?? (p.pumping ? 0 : WEAPON_BYTE_NO_WEAPON);
+    w.u8((id & WEAPON_BYTE_ID_MASK) |
+      (p.pumping ? WEAPON_BYTE_PUMPING : 0) |
+      (zombotsByte !== 0 ? WEAPON_BYTE_ZOMBOTS : 0));
+    if (zombotsByte !== 0) {
+      w.u8(zombotsByte);
+      if (crawlVariant !== 0) {
+        const prog = Math.max(
+          0,
+          Math.min(
+            CRAWL_PROGRESS_MASK,
+            Math.round((p.windowCrawlProgress ?? 0) * CRAWL_PROGRESS_MASK),
+          ),
+        );
+        w.u8((crawlVariant << CRAWL_VARIANT_SHIFT) | prog);
+      }
+    }
   }
   if (flags & PF_AMMO) {
     w.u8(p.ammoInMag ?? 0);
@@ -413,8 +459,23 @@ function readPlayer(r: ByteReader): WireSnapshotPlayer {
   }
   if (flags & PF_WEAPON) {
     const b = r.u8();
-    p.weapon = b & WEAPON_BYTE_ID_MASK;
+    const id = b & WEAPON_BYTE_ID_MASK;
+    if (id !== WEAPON_BYTE_NO_WEAPON) p.weapon = id;
     if (b & WEAPON_BYTE_PUMPING) p.pumping = true;
+    if (b & WEAPON_BYTE_ZOMBOTS) {
+      const z = r.u8();
+      if (z & ZB_DOWNED) p.downed = true;
+      if (z & ZB_ARMED) p.armedMask = (z >> ZB_ARMED_SHIFT) & ZB_ARMED_MASK;
+      if (z & ZB_WINDOW_CRAWL) {
+        const c = r.u8();
+        const variant = (c >> CRAWL_VARIANT_SHIFT) & 0x03;
+        if (variant === 1 || variant === 2 || variant === 3) {
+          p.windowCrawlVariant = variant;
+          p.windowCrawlProgress = (c & CRAWL_PROGRESS_MASK) /
+            CRAWL_PROGRESS_MASK;
+        }
+      }
+    }
   }
   if (flags & PF_AMMO) {
     p.ammoInMag = r.u8();
@@ -535,21 +596,19 @@ function asRecord(payload: unknown): Record<string, unknown> | null {
   return payload as Record<string, unknown>;
 }
 
-function writeInput(w: ByteWriter, payload: unknown): boolean {
-  const o = asRecord(payload);
-  if (!o || typeof o.sequence !== "number" || typeof o.yaw !== "number" ||
-    typeof o.pitch !== "number") {
-    return false;
-  }
-  writeHeader(w, NetOpcode.Input);
-  w.u32(o.sequence);
+/** Header flag bit indicating bundled 1-tick input frames (low byte = count). */
+const INPUT_FLAG_BUNDLED = 0x100;
+/** Hard cap on frames per bundled Input packet. */
+const INPUT_BUNDLE_MAX_FRAMES = 16;
+
+function writeInputFrame(w: ByteWriter, o: Record<string, unknown>): void {
+  w.u32(o.sequence as number);
   w.u8(encodeSnapKeys(o as { forward?: boolean }));
   w.i16(toMilli(o.yaw as number));
   w.i16(toMilli(o.pitch as number));
-  return true;
 }
 
-function readInput(r: ByteReader): unknown {
+function readInputFrame(r: ByteReader): Record<string, unknown> {
   const sequence = r.u32();
   const keys = r.u8();
   const yaw = fromMilli(r.i16());
@@ -567,6 +626,55 @@ function readInput(r: ByteReader): unknown {
     yaw,
     pitch,
   };
+}
+
+function isInputRecord(o: Record<string, unknown> | null): o is Record<string, unknown> {
+  return Boolean(
+    o &&
+      typeof o.sequence === "number" &&
+      typeof o.yaw === "number" &&
+      typeof o.pitch === "number",
+  );
+}
+
+function writeInput(w: ByteWriter, payload: unknown): boolean {
+  const o = asRecord(payload);
+  if (!isInputRecord(o)) return false;
+  if (Array.isArray(o.frames) && o.frames.length > 0) {
+    const valid: Record<string, unknown>[] = [];
+    for (const rawFrame of o.frames) {
+      const f = asRecord(rawFrame);
+      if (isInputRecord(f)) valid.push(f);
+    }
+    if (valid.length > 0) {
+      const slice = valid.length > INPUT_BUNDLE_MAX_FRAMES
+        ? valid.slice(valid.length - INPUT_BUNDLE_MAX_FRAMES)
+        : valid;
+      writeHeader(w, NetOpcode.Input, INPUT_FLAG_BUNDLED | slice.length);
+      for (const f of slice) writeInputFrame(w, f);
+      return true;
+    }
+  }
+  writeHeader(w, NetOpcode.Input);
+  writeInputFrame(w, o);
+  return true;
+}
+
+function readInput(r: ByteReader, flags: number): unknown {
+  if ((flags & INPUT_FLAG_BUNDLED) !== 0) {
+    const count = Math.min(INPUT_BUNDLE_MAX_FRAMES, flags & 0xff);
+    if (count <= 0) return null;
+    const frames: Record<string, unknown>[] = [];
+    for (let i = 0; i < count; i++) {
+      frames.push(readInputFrame(r));
+    }
+    if (!r.ok || frames.length === 0) return null;
+    return {
+      ...frames[frames.length - 1]!,
+      frames,
+    };
+  }
+  return readInputFrame(r);
 }
 
 function writeAim(w: ByteWriter, opcode: NetOpcode, payload: unknown): boolean {
@@ -1069,6 +1177,8 @@ function writeGameOver(w: ByteWriter, payload: unknown, opcode: NetOpcode): bool
   else if (o.xpMode === "unranked") flags |= 8;
   if (o.matchKind === "raid") flags |= 16;
   if (o.raid) flags |= 32;
+  if (o.matchKind === "zombots") flags |= 256;
+  if (o.zombots) flags |= 512;
   const winner = o.winner;
   if (winner === "A") flags |= 64;
   else if (winner === "B") flags |= 128;
@@ -1083,6 +1193,7 @@ function writeGameOver(w: ByteWriter, payload: unknown, opcode: NetOpcode): bool
   if (flags & 32) {
     writeRaidHud(w, o.raid as Record<string, unknown>);
   }
+  if (flags & 512) writeZombotsHud(w, o.zombots as Record<string, unknown>);
   return true;
 }
 
@@ -1124,6 +1235,185 @@ function readRaidHud(r: ByteReader): Record<string, unknown> {
   return raid;
 }
 
+// ── zombots HUD block (notes/zombots.md step 13) ──────────────────────────
+// Enum tables are append-only: a reorder shifts every recording.
+
+const ZOMBOTS_PHASES = ["waiting", "intermission", "wave", "over"] as const;
+const ZOMBOTS_POINT_REASONS = [
+  "hit",
+  "kill",
+  "waveSurvived",
+  "door",
+  "revivePress",
+  "start",
+] as const;
+const ZOMBOTS_RACK_WEAPONS = ["pistol", "rifle", "shotgun"] as const;
+const ZOMBOTS_FEED_KINDS = [
+  "waveStart",
+  "waveCleared",
+  "playerDowned",
+  "playerRevived",
+  "pointsChanged",
+  "doorOpened",
+  "weaponTaken",
+  "runOver",
+] as const;
+
+function enumIndex(table: readonly string[], value: unknown): number {
+  const i = table.indexOf(String(value));
+  return i < 0 ? 0 : i;
+}
+
+function enumValue<T extends string>(table: readonly T[], index: number): T {
+  return table[index] ?? table[0];
+}
+
+function u32Of(v: unknown): number {
+  return clampInt(typeof v === "number" ? v : 0, 0, 0xffffffff);
+}
+
+function i32Of(v: unknown): number {
+  return clampInt(typeof v === "number" ? v : 0, -0x80000000, 0x7fffffff);
+}
+
+function writeZombotsFeedEvent(w: ByteWriter, e: Record<string, unknown>): void {
+  const kind = enumIndex(ZOMBOTS_FEED_KINDS, e.kind);
+  w.u8(kind);
+  switch (ZOMBOTS_FEED_KINDS[kind]) {
+    case "waveStart":
+      w.u16(clampInt(Number(e.wave ?? 0), 0, 0xffff));
+      w.u16(clampInt(Number(e.zombieCount ?? 0), 0, 0xffff));
+      return;
+    case "waveCleared":
+      w.u16(clampInt(Number(e.wave ?? 0), 0, 0xffff));
+      return;
+    case "playerDowned":
+      w.str8(String(e.playerId ?? ""));
+      return;
+    case "playerRevived":
+      w.str8(String(e.playerId ?? ""));
+      w.str8(String(e.by ?? ""));
+      w.u8(clampInt(Math.round(Number(e.health ?? 0) * 100), 0, 100));
+      return;
+    case "pointsChanged":
+      w.str8(String(e.playerId ?? ""));
+      w.u32(u32Of(e.points));
+      w.i32(i32Of(e.delta));
+      w.u8(enumIndex(ZOMBOTS_POINT_REASONS, e.reason));
+      return;
+    case "doorOpened":
+      w.str8(String(e.doorId ?? ""));
+      w.str8(String(e.by ?? ""));
+      return;
+    case "weaponTaken":
+      w.str8(String(e.playerId ?? ""));
+      w.str8(String(e.rackId ?? ""));
+      w.u8(enumIndex(ZOMBOTS_RACK_WEAPONS, e.weapon));
+      return;
+    case "runOver":
+      w.u16(clampInt(Number(e.waveReached ?? 0), 0, 0xffff));
+      return;
+  }
+}
+
+function readZombotsFeedEvent(r: ByteReader): Record<string, unknown> {
+  const kind = enumValue(ZOMBOTS_FEED_KINDS, r.u8());
+  switch (kind) {
+    case "waveStart":
+      return { kind, wave: r.u16(), zombieCount: r.u16() };
+    case "waveCleared":
+      return { kind, wave: r.u16() };
+    case "playerDowned":
+      return { kind, playerId: r.str8() };
+    case "playerRevived":
+      return { kind, playerId: r.str8(), by: r.str8(), health: r.u8() / 100 };
+    case "pointsChanged":
+      return {
+        kind,
+        playerId: r.str8(),
+        points: r.u32(),
+        delta: r.i32(),
+        reason: enumValue(ZOMBOTS_POINT_REASONS, r.u8()),
+      };
+    case "doorOpened":
+      return { kind, doorId: r.str8(), by: r.str8() };
+    case "weaponTaken":
+      return {
+        kind,
+        playerId: r.str8(),
+        rackId: r.str8(),
+        weapon: enumValue(ZOMBOTS_RACK_WEAPONS, r.u8()),
+      };
+    case "runOver":
+      return { kind, waveReached: r.u16() };
+  }
+}
+
+function writeZombotsHud(w: ByteWriter, o: Record<string, unknown>): void {
+  w.u8(enumIndex(ZOMBOTS_PHASES, o.phase));
+  w.u16(clampInt(Number(o.wave ?? 0), 0, 0xffff));
+  w.u16(clampInt(Number(o.zombiesLeft ?? 0), 0, 0xffff));
+  w.u32(u32Of(o.nextWaveAtTick));
+  const doors = Array.isArray(o.openDoorIds) ? o.openDoorIds as unknown[] : [];
+  w.u8(Math.min(255, doors.length));
+  for (const id of doors.slice(0, 255)) w.str8(String(id));
+  const players = Array.isArray(o.players)
+    ? o.players as Array<Record<string, unknown>>
+    : [];
+  w.u8(Math.min(255, players.length));
+  for (const p of players.slice(0, 255)) {
+    w.str8(String(p.id ?? ""));
+    w.u32(u32Of(p.points));
+    w.u8(p.downed ? 1 : 0);
+  }
+  const revives = Array.isArray(o.revives)
+    ? o.revives as Array<Record<string, unknown>>
+    : [];
+  w.u8(Math.min(255, revives.length));
+  for (const rv of revives.slice(0, 255)) {
+    w.str8(String(rv.reviverId ?? ""));
+    w.str8(String(rv.targetId ?? ""));
+    w.u8(clampInt(Number(rv.presses ?? 0), 0, 255));
+  }
+  const events = Array.isArray(o.events)
+    ? o.events as Array<Record<string, unknown>>
+    : [];
+  w.u8(Math.min(255, events.length));
+  for (const e of events.slice(0, 255)) writeZombotsFeedEvent(w, e);
+}
+
+function readZombotsHud(r: ByteReader): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    phase: enumValue(ZOMBOTS_PHASES, r.u8()),
+    wave: r.u16(),
+    zombiesLeft: r.u16(),
+    nextWaveAtTick: r.u32(),
+  };
+  const nd = r.u8();
+  const openDoorIds: string[] = [];
+  for (let i = 0; i < nd; i++) openDoorIds.push(r.str8());
+  out.openDoorIds = openDoorIds;
+  const np = r.u8();
+  const players: Array<Record<string, unknown>> = [];
+  for (let i = 0; i < np; i++) {
+    players.push({ id: r.str8(), points: r.u32(), downed: r.u8() === 1 });
+  }
+  out.players = players;
+  const nr = r.u8();
+  const revives: Array<Record<string, unknown>> = [];
+  for (let i = 0; i < nr; i++) {
+    revives.push({ reviverId: r.str8(), targetId: r.str8(), presses: r.u8() });
+  }
+  out.revives = revives;
+  const ne = r.u8();
+  if (ne > 0) {
+    const events: Array<Record<string, unknown>> = [];
+    for (let i = 0; i < ne; i++) events.push(readZombotsFeedEvent(r));
+    out.events = events;
+  }
+  return out;
+}
+
 function readGameOver(r: ByteReader, flags: number): unknown {
   const scores = readScores(r);
   const n = r.u8();
@@ -1147,6 +1437,8 @@ function readGameOver(r: ByteReader, flags: number): unknown {
   if (flags & 32) {
     out.raid = readRaidHud(r);
   }
+  if (flags & 256) out.matchKind = "zombots";
+  if (flags & 512) out.zombots = readZombotsHud(r);
   return out;
 }
 
@@ -1224,6 +1516,8 @@ function writeWelcome(w: ByteWriter, payload: unknown): boolean {
   if (Array.isArray(o.skillLoadout)) flags |= 256;
   if (o.matchKind === "raid") flags |= 512;
   if (o.raid) flags |= 1024;
+  if (o.matchKind === "zombots") flags |= 2048;
+  if (o.zombots) flags |= 4096;
   writeHeader(w, NetOpcode.Welcome, flags);
   w.str8(o.id as string);
   w.str8(String(o.serverName ?? ""));
@@ -1269,6 +1563,7 @@ function writeWelcome(w: ByteWriter, payload: unknown): boolean {
   if (flags & 1024) {
     writeRaidHud(w, o.raid as Record<string, unknown>);
   }
+  if (flags & 4096) writeZombotsHud(w, o.zombots as Record<string, unknown>);
   return true;
 }
 
@@ -1334,6 +1629,8 @@ function readWelcome(r: ByteReader, flags: number): unknown {
   if (flags & 1024) {
     out.raid = readRaidHud(r);
   }
+  if (flags & 2048) out.matchKind = "zombots";
+  if (flags & 4096) out.zombots = readZombotsHud(r);
   return out;
 }
 
@@ -1577,6 +1874,15 @@ function encodeBody(w: ByteWriter, opcode: NetOpcode, payload: unknown): boolean
       return writeShoot(w, payload);
     case NetOpcode.Melee:
       return writeMelee(w, payload);
+    case NetOpcode.Interact:
+      return writeAim(w, NetOpcode.Interact, payload);
+    case NetOpcode.ZombotsState: {
+      const o = asRecord(payload);
+      if (!o) return false;
+      writeHeader(w, opcode);
+      writeZombotsHud(w, o);
+      return true;
+    }
     case NetOpcode.Reload:
     case NetOpcode.Ready:
     case NetOpcode.Leave:
@@ -1805,11 +2111,15 @@ function decodeBody(
 ): unknown {
   switch (opcode) {
     case NetOpcode.Input:
-      return readInput(r);
+      return readInput(r, flags);
     case NetOpcode.Shoot:
       return readShoot(r, flags);
     case NetOpcode.Melee:
       return readShoot(r, flags);
+    case NetOpcode.Interact:
+      return readShoot(r, flags);
+    case NetOpcode.ZombotsState:
+      return readZombotsHud(r);
     case NetOpcode.Reload:
     case NetOpcode.Ready:
     case NetOpcode.Leave:

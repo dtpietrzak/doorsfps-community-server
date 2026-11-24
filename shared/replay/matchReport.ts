@@ -54,6 +54,8 @@ export type MatchReportBody = {
   modeId?: string;
   /** Co-op raid catalog id when modeId is raid. */
   raidId?: string;
+  /** Zombots run: the wave reached. No rewards ride on it (decision 7). */
+  zombotsWaveReached?: number;
   mapName?: string | null;
   winningTeam?: string | null;
   scoreA?: number | null;
