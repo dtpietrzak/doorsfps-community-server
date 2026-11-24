@@ -35,10 +35,10 @@ function ctx(
   };
 }
 
-Deno.test("a revive is exactly 20 presses and costs 1000", () => {
+Deno.test("a revive is exactly 20 presses and costs 200", () => {
   assertEquals(PRESSES, 20);
-  assertEquals(COST, 50);
-  assertEquals(PRESSES * COST, 1000);
+  assertEquals(COST, 10);
+  assertEquals(PRESSES * COST, 200);
   assertEquals(HEALTH, 0.5);
 
   const ledger = new ZompointsLedger();

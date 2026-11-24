@@ -60,7 +60,7 @@ export const ZOMBOTS_TUNING = {
 
   revive: {
     presses: 20,
-    costPerPress: 50,
+    costPerPress: 10,
     /** Eye-to-body reach for the revive prompt (world units). */
     reach: 2.0,
     /** Fraction of max HP a revived player stands up with. */
