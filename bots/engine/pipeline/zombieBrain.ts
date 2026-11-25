@@ -15,7 +15,7 @@
 import type { BotBrainConfig } from "../config.ts";
 import type { BrainHooks } from "../hooks.ts";
 import { defaultBrainHooks } from "../hooks.ts";
-import { clamp01 } from "../math/index.ts";
+import { clamp01, fastSinCos } from "../math/index.ts";
 import { yawToward } from "../navigation/heading.ts";
 import { isSetNumber } from "./state.ts";
 import type {
@@ -261,7 +261,17 @@ function decorate(
     });
     if (lunge) armMeleeCooldown(draft, ctx.view.tick);
   }
-  const side = zombieSeparationStrafe(ctx.view.self, yaw, ctx.view.players);
+  let side = zombieSeparationStrafe(ctx.view.self, yaw, ctx.view.players);
+  // Don't let crowd separation shove a zombie sideways into a wall or open door jamb.
+  if (side !== "none") {
+    const sc = fastSinCos(yaw);
+    const sign = side === "right" ? 1 : -1;
+    const probeX = ctx.view.self.x + sc.cos * sign * 0.45;
+    const probeZ = ctx.view.self.z - sc.sin * sign * 0.45;
+    if (!ctx.view.collision.hasHeadroom(probeX, probeZ)) {
+      side = "none";
+    }
+  }
   // The stand-off ring is for the target (or active lure); a walk goal is just a waypoint.
   const hold = holdTarget !== null && walkGoal === null &&
     zombieHoldsForward(ctx.view.self, holdTarget, ctx.view.players);

@@ -219,3 +219,21 @@ Deno.test("pickDoorCenterBlineTarget: own door never qualifies (score-home trap)
     null,
   );
 });
+
+Deno.test("pickDoorCenterBlineTarget: null on zombots maps even when doorsOpen is true", () => {
+  const map: DoorsMap = { ...openMap(), mirrorMode: "zombots", spawnCorner: 1 };
+  const door = enemyDoorMidpoint(map, "B")!;
+  const z = door.z + 2.5;
+  const face = yawTowardPoint(0, z, door.x, door.z)!;
+  assertEquals(
+    pickDoorCenterBlineTarget({
+      x: 0,
+      z,
+      faceYaw: face,
+      map,
+      team: "B",
+      doorsOpen: true,
+    }),
+    null,
+  );
+});

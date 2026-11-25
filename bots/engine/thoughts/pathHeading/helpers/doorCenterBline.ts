@@ -67,6 +67,8 @@ export function pickDoorCenterBlineTarget(
   input: DoorCenterBlineInput,
 ): YawPolePoint | null {
   if (!input.doorsOpen) return null;
+  // Zombots permanently seals the perimeter energy doors.
+  if (input.map.mirrorMode === "zombots") return null;
   const maxDist = input.maxDist ?? DOOR_CENTER_BLINE_DIST;
   const half = input.fovHalfAngle ?? DOOR_CENTER_BLINE_FOV_HALF;
   if (!(maxDist > 0) || !(half > 0)) return null;

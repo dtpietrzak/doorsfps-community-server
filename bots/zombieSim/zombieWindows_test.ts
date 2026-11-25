@@ -371,3 +371,75 @@ Deno.test("the engine's zombie copy agrees with the server's zombie view at ever
     }
   }
 });
+
+Deno.test("a crowd of zombies approaching an open buyable door at an angle all pass through", async () => {
+  const map = await loadMapFile(MAP_PATH);
+  const layout = zombotsLayout(map);
+  const door = "door_ei1akqdg";
+  // Three zombies clustered at an oblique angle north-east of the door on x = 5, z = -5.
+  const zombies = [
+    simPawn("z1", "bot", 8, -2, { speedScale: SLOW }),
+    simPawn("z2", "bot", 8.5, -2.5, { speedScale: SLOW }),
+    simPawn("z3", "bot", 7.8, -1.5, { speedScale: SLOW }),
+  ];
+  // Human in phase 2, south-west of the door so a straight line clips the jamb.
+  const human = simPawn("h", "human", -2, -9);
+  assertEquals(layout.phaseOf(human), 2);
+  const w = await zombotsWorld([...zombies, human]);
+  w.open = [door];
+  w.server.openSlidingDoor(door);
+
+  for (let n = 0; n < 400; n++) {
+    botTick(w);
+    if (zombies.every((z) => dist(z, human) < 2.2)) break;
+  }
+  for (const z of zombies) {
+    assert(
+      dist(z, human) < 2.2,
+      `${z.id} got stuck at (${z.x.toFixed(2)}, ${z.z.toFixed(2)})`,
+    );
+  }
+});
+
+Deno.test("a zombie chasing a human pressed against a closed buyable door reaches them without snapping across", async () => {
+  const map = await loadMapFile(MAP_PATH);
+  const layout = zombotsLayout(map);
+  // Human pressed right up against the phase-1 side of the closed door at (5, -5).
+  const human = simPawn("h", "human", 5.65, -5);
+  // Zombie in phase 1 behind the pillar around x=10..14, z=-7..-3.
+  const zombie = simPawn("z", "bot", 16, -5, { speedScale: SLOW });
+  assertEquals(layout.phaseOf(zombie), 1);
+  const w = await zombotsWorld([zombie, human]);
+
+  let reached = false;
+  for (let n = 0; n < 350 && !reached; n++) {
+    botTick(w);
+    if (dist(zombie, human) < 2.0) reached = true;
+  }
+  assert(
+    reached,
+    `zombie never reached human near closed door, stuck at (${zombie.x.toFixed(2)}, ${zombie.z.toFixed(2)})`,
+  );
+});
+
+Deno.test("a zombie near the sealed south perimeter door in phase 2 is not pulled into the wall", async () => {
+  const map = await loadMapFile(MAP_PATH);
+  const layout = zombotsLayout(map);
+  // Team A's sealed perimeter door is at (0, -20). Put a zombie right next to it
+  // in phase 2 and a human further west along the south corridor.
+  const zombie = simPawn("z", "bot", 1.5, -18, { speedScale: SLOW });
+  const human = simPawn("h", "human", -10, -17);
+  assertEquals(layout.phaseOf(zombie), 2);
+  assertEquals(layout.phaseOf(human), 2);
+  const w = await zombotsWorld([zombie, human]);
+
+  let reached = false;
+  for (let n = 0; n < 350 && !reached; n++) {
+    botTick(w);
+    if (dist(zombie, human) < 2.0) reached = true;
+  }
+  assert(
+    reached,
+    `zombie got pulled into sealed perimeter door at (${zombie.x.toFixed(2)}, ${zombie.z.toFixed(2)})`,
+  );
+});

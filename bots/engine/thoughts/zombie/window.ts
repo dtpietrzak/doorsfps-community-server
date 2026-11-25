@@ -19,7 +19,14 @@
 import { zombotsLayout } from "../../../../shared/zombots/zombotsLayout.ts";
 import { SLIDING_DOOR_WIDTH } from "../../../../shared/world/slidingDoors.ts";
 import { WINDOW_WIDTH } from "../../../../shared/world/wallWindows.ts";
-import { abs, ceil, distance2, floor, normalize2 } from "../../math/index.ts";
+import {
+  abs,
+  ceil,
+  distance2,
+  distanceSquared2,
+  floor,
+  normalize2,
+} from "../../math/index.ts";
 import { yawToward } from "../../navigation/heading.ts";
 import {
   type BotBrainState,
@@ -109,6 +116,12 @@ const LOOKAHEAD_CELLS = 5;
 const NEAR_CELLS = 2;
 /** Chasing: this close (cells) to the goal, walk straight at it. */
 const CHASE_DIRECT_CELLS = 6;
+/**
+ * Sideways clearance (m) kept along straight segments in `clearRun`.
+ * Less than half a cell (0.25 m) so an axis-aligned step through a 1-cell
+ * open doorway stays valid while diagonal corner/jamb cuts are rejected.
+ */
+const CLEAR_MARGIN = 0.2;
 /** Chase fields kept at once (a few humans, a cell or two each). */
 const CHASE_CACHE = 16;
 
@@ -162,7 +175,8 @@ function nearestFloor(grid: NavGrid, p: Vec2, room: number): number {
       const n = cellIndex(grid, p.x + dx * NAV_CELL, p.z + dz * NAV_CELL);
       if (n < 0 || !grid.floor[n]) continue;
       if (room >= 0 && grid.room[n] !== room) continue;
-      const d = dx * dx + dz * dz;
+      const c = cellCenter(grid, n);
+      const d = distanceSquared2(c.x - p.x, c.z - p.z);
       if (best < 0 || d < bestD) {
         best = n;
         bestD = d;
@@ -201,30 +215,58 @@ function walkField(grid: NavGrid, start: number, room: number): number[] {
   return field;
 }
 
-/** Field cell for a body: its own, or the nearest-to-goal one close by. */
+/**
+ * Field cell for a body: its own, or the nearest Euclidean covered cell close
+ * by (preferring `room` when known). Picking by Euclidean distance instead of
+ * lowest field value prevents snapping across a wall or closed sliding door
+ * into the room on the far side.
+ */
 function fieldCell(
   grid: NavGrid,
   field: number[],
   x: number,
   z: number,
+  room = -1,
 ): number {
   const at = cellIndex(grid, x, z);
   if (at >= 0 && field[at]! >= 0) return at;
   let best = -1;
+  let bestD = 0;
+  let bestAny = -1;
+  let bestAnyD = 0;
   for (let dz = -NEAR_CELLS; dz <= NEAR_CELLS; dz++) {
     for (let dx = -NEAR_CELLS; dx <= NEAR_CELLS; dx++) {
       const n = cellIndex(grid, x + dx * NAV_CELL, z + dz * NAV_CELL);
       if (n < 0 || field[n]! < 0) continue;
-      if (best < 0 || field[n]! < field[best]!) best = n;
+      const c = cellCenter(grid, n);
+      const d = distanceSquared2(c.x - x, c.z - z);
+      if (
+        bestAny < 0 || d < bestAnyD - 1e-6 ||
+        (abs(d - bestAnyD) <= 1e-6 && field[n]! < field[bestAny]!)
+      ) {
+        bestAny = n;
+        bestAnyD = d;
+      }
+      if (room >= 0 && grid.room[n] === room) {
+        if (
+          best < 0 || d < bestD - 1e-6 ||
+          (abs(d - bestD) <= 1e-6 && field[n]! < field[best]!)
+        ) {
+          best = n;
+          bestD = d;
+        }
+      }
     }
   }
-  return best;
+  return best >= 0 ? best : bestAny;
 }
 
 /**
- * Every sample on the segment lands on a cell the field covers. The last
- * `endSlack` metres are not checked (a human against a wall stands on its
- * band, off the field).
+ * Every sample on the segment lands on a cell the field covers. When `margin`
+ * is positive, two offset tracks ±margin perpendicular to the segment must also
+ * stay on covered cells so straight runs don't clip wall corners or door jambs.
+ * The last `endSlack` metres are not checked (a human against a wall stands on
+ * its band, off the field).
  */
 function clearRun(
   grid: NavGrid,
@@ -232,18 +274,28 @@ function clearRun(
   from: Vec2,
   to: Vec2,
   endSlack = 0,
+  margin = 0,
 ): boolean {
-  const len = distance2(to.x - from.x, to.z - from.z);
+  const dx = to.x - from.x;
+  const dz = to.z - from.z;
+  const len = distance2(dx, dz);
+  if (len <= 1e-6) return true;
   const steps = ceil(len / (NAV_CELL / 2));
+  const perpX = margin > 0 ? (-dz / len) * margin : 0;
+  const perpZ = margin > 0 ? (dx / len) * margin : 0;
   for (let k = 1; k <= steps; k++) {
     const t = k / steps;
     if ((1 - t) * len < endSlack) break;
-    const n = cellIndex(
-      grid,
-      from.x + (to.x - from.x) * t,
-      from.z + (to.z - from.z) * t,
-    );
+    const px = from.x + dx * t;
+    const pz = from.z + dz * t;
+    const n = cellIndex(grid, px, pz);
     if (n < 0 || field[n]! < 0) return false;
+    if (margin > 0) {
+      const nl = cellIndex(grid, px + perpX, pz + perpZ);
+      if (nl < 0 || field[nl]! < 0) return false;
+      const nr = cellIndex(grid, px - perpX, pz - perpZ);
+      if (nr < 0 || field[nr]! < 0) return false;
+    }
   }
   return true;
 }
@@ -251,7 +303,7 @@ function clearRun(
 /**
  * A point a few cells down the field from `at`: the farthest one the body
  * can walk to in a straight line over field floor, so the goal never cuts
- * a wall end or a half wall.
+ * a wall end, a half wall or an open door jamb.
  */
 function downField(
   grid: NavGrid,
@@ -280,7 +332,7 @@ function downField(
     if (best === cur) break;
     cur = best;
     const next = cellCenter(grid, cur);
-    if (!clearRun(grid, field, from, next)) break;
+    if (!clearRun(grid, field, from, next, 0, CLEAR_MARGIN)) break;
     goal = next;
   }
   return goal;
@@ -424,8 +476,11 @@ function chaseField(nav: ZombieWindowNav, goal: Vec2): number[] | null {
   if (at < 0) return null;
   const cached = nav.chaseCells.indexOf(at);
   if (cached >= 0) return nav.chaseFields[cached]!;
-  // Humans stand near walls too: start from the nearest floor cell.
-  const start = nearestFloor(nav.grid, goal, -1);
+  // Humans stand near walls too: prefer floor in the goal's own room so a
+  // human pressed against a closed door never seeds the field on the far side.
+  const goalRoom = nav.roomOf(goal);
+  let start = goalRoom !== null ? nearestFloor(nav.grid, goal, goalRoom) : -1;
+  if (start < 0) start = nearestFloor(nav.grid, goal, -1);
   if (start < 0) return null;
   if (nav.chaseCells.length >= CHASE_CACHE) {
     nav.chaseCells.length = 0;
@@ -482,7 +537,7 @@ function routeCost(
   goal: Vec2 | null,
   goalField: number[] | null,
 ): number {
-  const at = fieldCell(nav.grid, p.field, self.x, self.z);
+  const at = fieldCell(nav.grid, p.field, self.x, self.z, p.zombieRoom);
   if (at < 0) return -1;
   const toWindow = p.field[at]! * NAV_CELL;
   if (goalField !== null) {
@@ -521,15 +576,17 @@ function chasePlan(
   nav: ZombieWindowNav,
   self: Vec2,
   goal: Vec2 | null,
+  room: number | null = null,
 ): ZombieWindowPlan {
   if (goal === null) return NONE;
   const field = chaseField(nav, goal);
   if (field === null) return NONE;
-  const at = fieldCell(nav.grid, field, self.x, self.z);
+  const at = fieldCell(nav.grid, field, self.x, self.z, room ?? -1);
   if (at < 0) return NONE;
   // Close and nothing in the way: the plain chase (and its swing) takes over.
   if (
-    field[at]! <= CHASE_DIRECT_CELLS && clearRun(nav.grid, field, self, goal, 1)
+    field[at]! <= CHASE_DIRECT_CELLS &&
+    clearRun(nav.grid, field, self, goal, NAV_CELL, CLEAR_MARGIN)
   ) {
     return NONE;
   }
@@ -556,7 +613,7 @@ export function zombieWindowPlan(
 
   if (room !== null && nav.isPlayerRoom(room)) {
     clearLatch(state);
-    return chasePlan(nav, self, goal);
+    return chasePlan(nav, self, goal, room);
   }
 
   let portal: ZombieWindowPortal | null = latched;
@@ -627,7 +684,7 @@ export function zombieWindowPlan(
     };
   }
   // Follow the window's field round the closure's walls.
-  const at = fieldCell(nav.grid, portal.field, self.x, self.z);
+  const at = fieldCell(nav.grid, portal.field, self.x, self.z, portal.zombieRoom);
   return {
     kind: "walk",
     goal: at < 0 ? a : downField(nav.grid, portal.field, at, self),
