@@ -446,7 +446,8 @@ export type PlayerRespawnedEvent = {
 /**
  * Zombots rules fact (step 14). `doorOpened` drops a door block from
  * collision, `revived` stands a downed player up at `healthFraction` of max
- * HP, `armed` adds a gun to the armed set (`refill` = ammo top-up only).
+ * HP, `armed` adds a gun to the armed set (`refill` = ammo top-up only),
+ * `powerRecharged` starts a power recharge rack's skill-charge regen.
  */
 export type ZombotsAuthoritativeEvent =
   | { kind: "zombots"; appliedTick: number; op: "doorOpened"; doorId: string; by: string }
@@ -465,7 +466,8 @@ export type ZombotsAuthoritativeEvent =
     playerId: string;
     weaponId: number;
     refill: boolean;
-  };
+  }
+  | { kind: "zombots"; appliedTick: number; op: "powerRecharged"; playerId: string };
 
 /** Discriminated union — the only vocabulary for non-input sim mutations. */
 export type AuthoritativeEvent =
@@ -1235,6 +1237,11 @@ function normalizeZombotsEvent(
         weaponId: Math.trunc(finiteOr(o.weaponId, 0)),
         refill: asBool(o.refill),
       };
+    }
+    case "powerRecharged": {
+      const playerId = nonEmptyString(o.playerId);
+      if (!playerId) return null;
+      return { kind: "zombots", appliedTick, op: "powerRecharged", playerId };
     }
     default:
       return null;

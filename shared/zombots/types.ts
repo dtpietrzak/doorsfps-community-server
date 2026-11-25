@@ -20,6 +20,12 @@ export type ZombotsSpawnPoint = { id: string; p: { x: number; z: number } };
 export type ZombotsRackWeapon = "pistol" | "rifle" | "shotgun";
 
 /**
+ * What a rack hangs. A gun, or `power`: the power recharge rack, which
+ * restores the player's spent skills for zompoints (`powerRack.ts`).
+ */
+export type ZombotsRackKind = ZombotsRackWeapon | "power";
+
+/**
  * Side effects the rules ask the glue to perform. The rules never perform
  * them; the server runtime turns them into BotManager calls and packets, the
  * local driver into local bots and HUD state.
@@ -42,6 +48,8 @@ export type ZombotsIntent =
   | { kind: "pointsChanged"; playerId: ZombotsPlayerId; points: number; delta: number; reason: ZombotsPointsReason }
   | { kind: "doorOpened"; doorId: string; by: ZombotsPlayerId }
   | { kind: "weaponTaken"; playerId: ZombotsPlayerId; rackId: string; weapon: ZombotsRackWeapon }
+  /** A gun rack press refused with nothing charged: spare mags already full. */
+  | { kind: "rackRefused"; playerId: ZombotsPlayerId; rackId: string }
   | { kind: "runOver"; waveReached: number };
 
 export type ZombotsPointsReason =
@@ -50,6 +58,8 @@ export type ZombotsPointsReason =
   | "waveSurvived"
   | "door"
   | "revivePress"
+  | "powerRecharge"
+  | "gunRack"
   | "start";
 
 /** Game events the glue feeds into the rules each tick. */

@@ -177,6 +177,8 @@ const HUD = {
     { kind: "pointsChanged", playerId: "p1", points: 1250, delta: -50, reason: "revivePress" },
     { kind: "doorOpened", doorId: "door-2", by: "p1" },
     { kind: "weaponTaken", playerId: "p1", rackId: "rack-2", weapon: "rifle" },
+    { kind: "pointsChanged", playerId: "p1", points: 1150, delta: -100, reason: "gunRack" },
+    { kind: "rackRefused", playerId: "p1", rackId: "rack-2" },
     { kind: "runOver", waveReached: 7 },
   ],
 };

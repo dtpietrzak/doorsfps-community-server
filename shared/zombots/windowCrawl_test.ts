@@ -79,3 +79,17 @@ Deno.test("Zombots-01 portals are one-way (outside to inside only)", async () =>
     `expected inside landing at -${WINDOW_CRAWL_EXIT_DEPTH}, got ${endDepth}`,
   );
 });
+
+Deno.test("tryStartWindowCrawl accepts funnel-edge lateral offset and close sill depth", async () => {
+  const map = await loadMapFile(MAP_PATH);
+  const portals = buildWindowCrawlPortals(map);
+  const p = portals[0]!;
+  // Tangent along the wall: (-outZ, outX).
+  const edgePos = {
+    x: p.centerX + p.outX * 0.1 + -p.outZ * 0.55,
+    z: p.centerZ + p.outZ * 0.1 + p.outX * 0.55,
+  };
+  const inward = { x: -p.outX, z: -p.outZ };
+  const started = tryStartWindowCrawl(portals, edgePos, inward, "z-edge", 99);
+  assert(started !== null, "expected crawl to start at funnel edge / close sill depth");
+});

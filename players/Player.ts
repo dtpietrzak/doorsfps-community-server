@@ -2321,6 +2321,29 @@ export class Player {
     }
   }
 
+  /**
+   * Zombots power recharge rack: true when a skill is spent and no charge
+   * regen is already running, so a paid recharge would restore something.
+   */
+  public canPowerRecharge(tick: number): boolean {
+    if (
+      this.abilityDoorRegenEndsAtTick !== null &&
+      tick < this.abilityDoorRegenEndsAtTick
+    ) {
+      return false;
+    }
+    return this.trackedSkillIds().some((id) => this.isAbilitySpent(id));
+  }
+
+  /**
+   * Zombots gun rack: true when this gun is armed and its spare mags are
+   * already full, so a rack use would give nothing.
+   */
+  public hasFullSpareClips(weaponId: number): boolean {
+    if (!this.isWeaponArmed(weaponId)) return false;
+    return this.spareClipsFor(weaponId) >= spareClipsForWeapon(weaponId);
+  }
+
   /** Skill ids that may appear in spent / active maps this match. */
   private trackedSkillIds(): SkillId[] {
     const ids = new Set<SkillId>();

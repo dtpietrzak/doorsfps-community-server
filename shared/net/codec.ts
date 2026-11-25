@@ -1246,6 +1246,8 @@ const ZOMBOTS_POINT_REASONS = [
   "door",
   "revivePress",
   "start",
+  "powerRecharge",
+  "gunRack",
 ] as const;
 const ZOMBOTS_RACK_WEAPONS = ["pistol", "rifle", "shotgun"] as const;
 const ZOMBOTS_FEED_KINDS = [
@@ -1257,6 +1259,7 @@ const ZOMBOTS_FEED_KINDS = [
   "doorOpened",
   "weaponTaken",
   "runOver",
+  "rackRefused",
 ] as const;
 
 function enumIndex(table: readonly string[], value: unknown): number {
@@ -1313,6 +1316,10 @@ function writeZombotsFeedEvent(w: ByteWriter, e: Record<string, unknown>): void 
     case "runOver":
       w.u16(clampInt(Number(e.waveReached ?? 0), 0, 0xffff));
       return;
+    case "rackRefused":
+      w.str8(String(e.playerId ?? ""));
+      w.str8(String(e.rackId ?? ""));
+      return;
   }
 }
 
@@ -1346,6 +1353,8 @@ function readZombotsFeedEvent(r: ByteReader): Record<string, unknown> {
       };
     case "runOver":
       return { kind, waveReached: r.u16() };
+    case "rackRefused":
+      return { kind, playerId: r.str8(), rackId: r.str8() };
   }
 }
 

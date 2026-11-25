@@ -23,7 +23,7 @@ import {
   type ZombotsRoomStats,
   zombotsRoomRaster,
 } from "./zombotsDoors.ts";
-import type { ZombotsRackWeapon, ZombotsSpawnGate } from "./types.ts";
+import type { ZombotsRackKind, ZombotsRackWeapon, ZombotsSpawnGate } from "./types.ts";
 
 type Vec2 = { x: number; z: number };
 
@@ -37,7 +37,7 @@ export type ZombotsLayoutMap = ZombotsDoorMap & {
     id: string;
     wallId: string;
     center: Vec2;
-    weapon: ZombotsRackWeapon;
+    weapon: ZombotsRackKind;
     /** 1 = faces the wall's left normal, -1 the right (see `GunRack.face`). */
     face?: 1 | -1;
   }[];
@@ -58,7 +58,7 @@ export type ZombotsWindowLink = {
 
 export type ZombotsRackPlacement = {
   rackId: string;
-  weapon: ZombotsRackWeapon;
+  weapon: ZombotsRackKind;
   /** Player closure the rack faces; null when neither or both sides are one. */
   playerRoom: number | null;
   phase: ZombotsLayoutPhase | null;
@@ -107,10 +107,12 @@ const CENTER_ON_WALL = 0.25;
  * The first phase a weapon's rack may hang in. Later phases may carry it too
  * (a pistol rack in every phase, a rifle rack in 2 and 3), never earlier.
  */
-const RACK_PHASE: Record<ZombotsRackWeapon, ZombotsLayoutPhase> = {
+const RACK_PHASE: Record<ZombotsRackKind, ZombotsLayoutPhase> = {
   pistol: 1,
   rifle: 2,
   shotgun: 3,
+  // The power rack restores skills, which any phase may need.
+  power: 1,
 };
 
 /** "phase 3" / "phase 2 or later" / "any phase", for rack messages. */
@@ -304,7 +306,7 @@ export function zombotsLayout(map: ZombotsLayoutMap): ZombotsLayout {
 
   // --- Gun racks: the picked side, or else the side with a player closure, is the front.
   const rackPhase: ZombotsRackPlacement[] = [];
-  const rackedWeapons = new Set<ZombotsRackWeapon>();
+  const rackedWeapons = new Set<ZombotsRackKind>();
   const seenRack = new Set<string>();
   for (const rack of map.gunRacks ?? []) {
     if (seenRack.has(rack.id)) continue;
@@ -365,7 +367,7 @@ export function zombotsLayout(map: ZombotsLayoutMap): ZombotsLayout {
       );
     }
   }
-  for (const weapon of ["pistol", "rifle", "shotgun"] as const) {
+  for (const weapon of ["pistol", "rifle", "shotgun"] as const satisfies readonly ZombotsRackWeapon[]) {
     if (!rackedWeapons.has(weapon)) warnings.push(`No ${weapon} rack; phase ${RACK_PHASE[weapon]} should have one.`);
   }
 

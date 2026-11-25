@@ -30,6 +30,15 @@ Deno.test("good racks are kept in order on a zombots map", () => {
   ]);
 });
 
+Deno.test("a power recharge rack is a kept rack kind", () => {
+  const out = normalizeGunRacks({
+    mirrorMode: "zombots",
+    walls,
+    gunRacks: [rack("p", 0, { weapon: "power" }), rack("g", 2)],
+  });
+  assertEquals(out.map((r) => r.weapon), ["power", "rifle"]);
+});
+
 Deno.test("bad racks are dropped one by one", () => {
   const out = normalizeGunRacks({
     mirrorMode: "zombots",

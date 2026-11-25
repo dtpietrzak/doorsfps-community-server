@@ -615,7 +615,11 @@ export function zombieWindowPlan(
   }
   state.halfWallVaultTicksLeft = UNSET;
   const a = approachPoint(portal);
-  if (distance2(a.x - self.x, a.z - self.z) <= ALIGN_RADIUS && depth > 0) {
+  if (
+    distance2(a.x - self.x, a.z - self.z) <= ALIGN_RADIUS &&
+    depth > 0 &&
+    clearRun(nav.grid, portal.field, self, a, NAV_CELL)
+  ) {
     return {
       kind: "steer",
       yaw: yawToward(self.x, self.z, a.x, a.z),

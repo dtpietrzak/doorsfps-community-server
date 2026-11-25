@@ -432,6 +432,17 @@ Deno.test("zombots: a rack arms from its own side only, then refills", async () 
     refill: false,
   }]);
   assertEquals(h.players.get("p1")!.isWeaponArmed(WEAPON_PISTOL), true);
+  // Spares are full: a second press is refused and facts stay empty.
+  h.runtime.queueInteract("p1", { yaw: 0, pitch: 0 });
+  assertEquals(h.step().facts, []);
+  // Spend a spare mag and fund the purse: now it refills.
+  (h.players.get("p1")! as unknown as { loadouts: Record<number, { spareClips: number }> })
+    .loadouts[WEAPON_PISTOL]!.spareClips -= 1;
+  // The first take cost the whole starting purse; earn the next use's price.
+  for (let i = 0; i < 2; i++) {
+    (h.runtime as unknown as { run: { ledger: { award(id: string, r: string): void } } })
+      .run.ledger.award("p1", "kill");
+  }
   h.runtime.queueInteract("p1", { yaw: 0, pitch: 0 });
   assertEquals(h.step().facts[0], {
     op: "armed",
@@ -486,4 +497,79 @@ Deno.test("zombots: 10th zombot spawns smaller and twice as fast", () => {
     z10.moveSpeedScale,
     ZOMBOTS_TUNING.zombie.baseSpeedScale * ZOMBOTS_TUNING.zombie.miniSpeedMultiplier,
   );
+});
+
+Deno.test("zombots: stuck zombie relocates to another open spawn then auto-kills if still stagnant", () => {
+  // 8 spaced spawns (> wave 1's 6 zombies) so no two zombies overlap on spawn.
+  const spacedMap: DoorsMap = {
+    ...OPEN_MAP,
+    zombieSpawns: Array.from({ length: 8 }, (_, i) => ({
+      id: `zs${i + 1}`,
+      p: { x: -16 + i * 4.5, z: 15 },
+    })),
+  };
+  const h = harness(spacedMap);
+  h.join("p1");
+  h.steps(FIRST_WAVE_TICKS);
+  const zid = [...h.zombies][0]!;
+  const z = h.players.get(zid)!;
+  const startX = z.x;
+  const startZ = z.z;
+
+  // After relocateAfterMs without moving, zombie relocates to another open spawn.
+  const relocateTicks = Math.ceil(ZOMBOTS_TUNING.stuck.relocateAfterMs / (1000 / TICK_HZ)) + 2;
+  h.steps(relocateTicks);
+  assert(h.zombies.has(zid), "zombie should still be alive after first relocate");
+  assert(
+    Math.hypot(z.x - startX, z.z - startZ) >= ZOMBOTS_TUNING.stuck.progressRadius,
+    `expected zombie to relocate away from (${startX}, ${startZ}), still at (${z.x}, ${z.z})`,
+  );
+
+  // If it remains stagnant until killAfterMs, it is auto-killed with no points.
+  const remainingKillTicks = Math.ceil(
+    (ZOMBOTS_TUNING.stuck.killAfterMs - ZOMBOTS_TUNING.stuck.relocateAfterMs) / (1000 / TICK_HZ),
+  ) + 5;
+  h.steps(remainingKillTicks);
+  assertEquals(h.zombies.has(zid), false);
+  // No kill points were paid to the human for a timeout auto-kill.
+  const p1Points = h.runtime.hud()!.players.find((p) => p.id === "p1")!.points;
+  assertEquals(p1Points, ZOMBOTS_TUNING.points.start);
+});
+
+Deno.test("zombots: moving zombie is not relocated and hits maxLifetimeMs cap", () => {
+  const spacedMap: DoorsMap = {
+    ...OPEN_MAP,
+    zombieSpawns: Array.from({ length: 8 }, (_, i) => ({
+      id: `zs${i + 1}`,
+      p: { x: -16 + i * 4.5, z: 15 },
+    })),
+  };
+  const h = harness(spacedMap);
+  h.join("p1");
+  h.steps(FIRST_WAVE_TICKS);
+  const zid = [...h.zombies][0]!;
+  const z = h.players.get(zid)!;
+  // Move our tracked zombie onto its own clear lane away from all spawns.
+  z.x = 0;
+  z.z = 0;
+
+  // Walk back and forth > progressRadius every 5s: never triggers stagnation kill.
+  const stepChunk = Math.ceil(5_000 / (1000 / TICK_HZ));
+  const pastKillChunks = Math.ceil(ZOMBOTS_TUNING.stuck.killAfterMs / 5_000) + 1;
+  let dir = 1;
+  for (let c = 0; c < pastKillChunks; c++) {
+    z.x += dir * (ZOMBOTS_TUNING.stuck.progressRadius + 1);
+    dir = -dir;
+    h.steps(stepChunk);
+  }
+  assert(h.zombies.has(zid), "actively moving zombie must not be killed by stagnation");
+
+  // Keep moving past maxLifetimeMs: hard lifetime cap eventually kills it.
+  const totalChunks = Math.ceil(ZOMBOTS_TUNING.stuck.maxLifetimeMs / 5_000) + 2;
+  for (let c = pastKillChunks; c < totalChunks && h.zombies.has(zid); c++) {
+    z.x += dir * (ZOMBOTS_TUNING.stuck.progressRadius + 1);
+    dir = -dir;
+    h.steps(stepChunk);
+  }
+  assertEquals(h.zombies.has(zid), false, "zombie must be auto-killed at maxLifetimeMs");
 });

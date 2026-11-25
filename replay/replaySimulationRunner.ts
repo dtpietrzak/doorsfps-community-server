@@ -516,6 +516,9 @@ function applyZombotsFact(
       if (event.refill) manager.refillPlayerAmmo(event.playerId, event.weaponId);
       else manager.armPlayer(event.playerId, event.weaponId);
       return;
+    case "powerRecharged":
+      manager.powerRechargePlayer(event.playerId);
+      return;
   }
 }
 

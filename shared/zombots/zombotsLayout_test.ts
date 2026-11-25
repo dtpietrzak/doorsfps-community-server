@@ -248,6 +248,21 @@ Deno.test("racks: an earlier weapon may hang in a later phase too", () => {
   assertEquals(layout.rackPhase.map((r) => [r.rackId, r.phase]), [["pistol-2", 2], ["rifle-2", 2]]);
 });
 
+Deno.test("racks: power recharge racks hang in any phase, with no phase error or missing-rack warning", () => {
+  const layout = zombotsLayout(base({
+    gunRacks: [
+      ...base().gunRacks!,
+      { id: "pw1", wallId: "wz", center: { x: -3, z: 5 }, weapon: "power" },
+      { id: "pw2", wallId: "wz", center: { x: 17, z: 5 }, weapon: "power" },
+    ],
+  }));
+  assertEquals(layout.errors, []);
+  const power = layout.rackPhase.filter((r) => r.weapon === "power");
+  assertEquals(power.map((r) => r.phase), [2, 3]);
+  assert(power.every((r) => r.facing !== null));
+  assertEquals(layout.warnings.filter((w) => /power/i.test(w)), []);
+});
+
 Deno.test("slivers: a closed wall box is a warning, not a closure", () => {
   const box = [
     { id: "b1", a: { x: -15, z: -6 }, b: { x: -13, z: -6 }, kind: "full" },

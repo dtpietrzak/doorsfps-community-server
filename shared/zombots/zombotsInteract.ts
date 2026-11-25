@@ -10,7 +10,7 @@
  */
 
 import { distanceSquared2 } from "../math/distance.ts";
-import { withinRackReach, type ZombotsGunRack } from "./armory.ts";
+import { withinRackReach, type ZombotsRack } from "./armory.ts";
 import { withinDoorReach, type ZombotsDoor } from "./zombotsDoors.ts";
 import type { ZombotsPlayerId } from "./types.ts";
 
@@ -23,7 +23,7 @@ export type ZombotsInteractTarget =
 
 /** A rack and the wall normal pointing into its player closure. */
 export type ZombotsInteractRack = {
-  rack: ZombotsGunRack;
+  rack: ZombotsRack;
   /** Null when the layout could not tell (the rack is then never offered). */
   facing: Vec2 | null;
 };

@@ -124,7 +124,7 @@ export class ZombieBrain {
       draft,
     );
     if (window.kind === "steer") {
-      return {
+      const steerReady: ReadyAction = {
         input: {
           ...idleInput(window.yaw, 0),
           forward: true,
@@ -132,6 +132,7 @@ export class ZombieBrain {
         },
         shoot: false,
       };
+      return runStuckWTurnStep(ctx, steerReady, draft, this.rng).out;
     }
 
     // Door edges still clear sticky poles. The mode itself is then forced

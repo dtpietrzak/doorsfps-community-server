@@ -3050,6 +3050,28 @@ export class PlayerManager {
     return player.armWeapon(weaponId, this.simTick, refill);
   }
 
+  /** True when a gun rack would add nothing: armed with it, spare mags full. */
+  public hasFullSpareClips(id: string, weaponId: number): boolean {
+    return this.players.get(id)?.hasFullSpareClips(weaponId) ?? false;
+  }
+
+  /** True when a power recharge rack would restore a spent skill for this player. */
+  public canPowerRecharge(id: string): boolean {
+    return this.players.get(id)?.canPowerRecharge(this.simTick) ?? false;
+  }
+
+  /**
+   * Power recharge rack: start the same charge regen a door capture does, so
+   * spent skills come back when its window ends. False when there is nothing
+   * to restore (or no such player).
+   */
+  public powerRechargePlayer(id: string): boolean {
+    const player = this.players.get(id);
+    if (!player || !player.canPowerRecharge(this.simTick)) return false;
+    player.beginAbilityDoorRegen(this.simTick);
+    return true;
+  }
+
   /** Replenish spare clips for one armed gun (rack refill) and select it. */
   public refillPlayerAmmo(id: string, weaponId: number): boolean {
     const player = this.players.get(id);

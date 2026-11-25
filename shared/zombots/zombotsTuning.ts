@@ -70,6 +70,23 @@ export const ZOMBOTS_TUNING = {
   racks: {
     /** Eye-to-rack reach for taking a gun (world units). */
     reach: 2.5,
+    /** Zompoints one gun rack use costs (a take or an ammo refill). */
+    gunCost: 100,
+    /** Zompoints one power recharge rack use costs. */
+    powerCost: 500,
+  },
+
+  stuck: {
+    /** Planar displacement (m) from anchor that counts as real progress. */
+    progressRadius: 2.0,
+    /** No-progress time before relocating a stuck zombie to an open spawn. */
+    relocateAfterMs: 15_000,
+    /** Maximum relocates before falling back to auto-kill. */
+    maxRelocates: 2,
+    /** Continuous no-progress time before auto-killing a stuck zombie. */
+    killAfterMs: 45_000,
+    /** Hard ceiling on how long any single zombie may stay alive. */
+    maxLifetimeMs: 240_000,
   },
 } as const;
 

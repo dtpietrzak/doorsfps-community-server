@@ -16,11 +16,13 @@ import {
   SPAWN_INVULN_TICKS,
   WEAPON_PISTOL,
 } from "../protocol/network.ts";
+import { spareClipsForWeapon } from "../shared/sim/weapons.ts";
 import { ZOMBOTS_RACK_WEAPON_ID } from "../shared/zombots/armory.ts";
 import type { ZombotsHudPacket } from "../shared/zombots/zombotsHud.ts";
 import { ZombotsDoorState, zombotsRoomGraph } from "../shared/zombots/zombotsDoors.ts";
 import { zombotsLayout } from "../shared/zombots/zombotsLayout.ts";
 import { ZOMBOTS_TUNING } from "../shared/zombots/zombotsTuning.ts";
+import { wallMountOffset } from "../shared/world/slidingDoors.ts";
 import type { ClientSession, SessionHub } from "../transport/types.ts";
 import { loadMapFile } from "../world/loadMap.ts";
 import type { DoorsMap } from "../world/map.ts";
@@ -109,8 +111,35 @@ function fakeSession(id: string, name: string) {
   return { session, sent, ons };
 }
 
-async function makeRig() {
+/**
+ * Zombots-01 has no power rack yet: hang one on the pistol rack's wall, beside
+ * it, on whichever side the board still fits.
+ */
+function addPowerRackBesidePistol(map: DoorsMap): void {
+  const pistol = map.gunRacks!.find((r) => r.weapon === "pistol")!;
+  const wall = map.walls.find((w) => w.id === pistol.wallId)!;
+  const len = Math.hypot(wall.b.x - wall.a.x, wall.b.z - wall.a.z);
+  const ux = (wall.b.x - wall.a.x) / len;
+  const uz = (wall.b.z - wall.a.z) / len;
+  for (const step of [1.3, -1.3]) {
+    const center = { x: pistol.center.x + ux * step, z: pistol.center.z + uz * step };
+    const mount = wallMountOffset(wall.a, wall.b, center);
+    if (!mount || mount.s - 0.6 < 0 || mount.s + 0.6 > mount.len) continue;
+    map.gunRacks!.push({
+      id: "power-test",
+      wallId: wall.id,
+      center,
+      weapon: "power",
+      ...(pistol.face !== undefined ? { face: pistol.face } : {}),
+    });
+    return;
+  }
+  throw new Error("no room for a power rack beside the pistol rack");
+}
+
+async function makeRig(opts: { powerRack?: boolean } = {}) {
   const map = await loadMapFile(ZOMBOTS_01.pathname);
+  if (opts.powerRack) addPowerRackBesidePistol(map);
   const server = new GameServer({
     name: "zombots-scenarios",
     port: 0,
@@ -245,7 +274,15 @@ function takeFromRack(
   rig: Rig,
   player: Player,
   rack: ReturnType<ReturnType<typeof mapFacts>["rackOf"]>,
+  /** Top the purse up to a gun rack's price first (power racks are funded by their test). */
+  fund = rack.weapon !== "power",
 ) {
+  if (fund) {
+    const ledger = (rig.internals.zombotsRuntime as unknown as {
+      run: { ledger: { get(id: string): number; award(id: string, reason: string): unknown } };
+    }).run.ledger;
+    while (ledger.get(player.id) < T.racks.gunCost) ledger.award(player.id, "kill");
+  }
   rig.stand(player, {
     x: rack.center.x + rack.facing.x * 1.0,
     z: rack.center.z + rack.facing.z * 1.0,
@@ -532,6 +569,95 @@ Deno.test("zombots scenario: unarmed players can't fire until they take from the
   assertEquals(p1.ammoInMag, full - 1);
   assertEquals(p1.spareClips, fullSpares);
   assertEquals(p1.armedMask(), 1 << WEAPON_PISTOL);
+});
+
+Deno.test("zombots scenario: a gun rack use costs 100, and full spare mags are refused for free", async () => {
+  const rig = await makeRig();
+  const facts = mapFacts(rig.map);
+  const [p1] = startWave1(rig, "Alpha");
+  const rack = facts.rackOf("pistol");
+  const ledger = (rig.internals.zombotsRuntime as unknown as {
+    run: {
+      ledger: {
+        get(id: string): number;
+        award(id: string, reason: string): unknown;
+        trySpend(id: string, cost: number, reason: string): unknown;
+      };
+    };
+  }).run.ledger;
+  const fullSpares = spareClipsForWeapon(WEAPON_PISTOL);
+
+  // Short of 100: nothing happens.
+  ledger.trySpend(p1.id, ledger.get(p1.id), "door");
+  assertEquals(ledger.get(p1.id), 0);
+  takeFromRack(rig, p1, rack, false);
+  assertEquals(p1.armedMask(), 0);
+
+  // First take pays 100.
+  while (ledger.get(p1.id) < 250) ledger.award(p1.id, "kill");
+  const before = ledger.get(p1.id);
+  takeFromRack(rig, p1, rack, false);
+  assertEquals(p1.armedMask(), 1 << WEAPON_PISTOL);
+  assertEquals(ledger.get(p1.id), before - T.racks.gunCost);
+
+  // Spares are full: refused, nothing charged.
+  const afterTake = ledger.get(p1.id);
+  rig.ticks(TICK_HZ);
+  assertEquals(p1.spareClipsFor(WEAPON_PISTOL), fullSpares);
+  takeFromRack(rig, p1, rack, false);
+  assertEquals(ledger.get(p1.id), afterTake);
+
+  // Use a spare mag: the next use refills the spares for 100.
+  (p1 as unknown as { loadouts: Record<number, { spareClips: number }> })
+    .loadouts[WEAPON_PISTOL]!.spareClips = fullSpares - 1;
+  assertEquals(p1.spareClipsFor(WEAPON_PISTOL), fullSpares - 1);
+  takeFromRack(rig, p1, rack, false);
+  assertEquals(ledger.get(p1.id), afterTake - T.racks.gunCost);
+  assertEquals(p1.spareClipsFor(WEAPON_PISTOL), fullSpares);
+});
+
+// ── 4b. power recharge rack ─────────────────────────────────────────────────
+
+Deno.test("zombots scenario: a power rack restores spent skills for 500 zompoints, and never charges for nothing", async () => {
+  const rig = await makeRig({ powerRack: true });
+  const facts = mapFacts(rig.map);
+  const [p1] = startWave1(rig, "Alpha");
+  const rack = facts.rackOf("power");
+  const cost = T.racks.powerCost;
+  assertEquals(cost, 500);
+  const ledger = (rig.internals.zombotsRuntime as unknown as {
+    run: { ledger: { get(id: string): number; award(id: string, reason: string): unknown } };
+  }).run.ledger;
+  const players = rig.internals.players;
+
+  // Spawn locks the kit until a capture, which zombots never has.
+  p1.lockAbilityChargesUntilDoor();
+  assertEquals(players.canPowerRecharge(p1.id), true);
+
+  // Short of 500: refused, still spent, nothing debited.
+  const before = ledger.get(p1.id);
+  assert(before < cost);
+  takeFromRack(rig, p1, rack);
+  assertEquals(ledger.get(p1.id), before);
+  assertEquals(players.canPowerRecharge(p1.id), true);
+
+  // With 500 it pays and the charges come back after the regen window.
+  while (ledger.get(p1.id) < cost) ledger.award(p1.id, "kill");
+  const rich = ledger.get(p1.id);
+  takeFromRack(rig, p1, rack);
+  assertEquals(ledger.get(p1.id), rich - cost);
+  assertEquals(rig.points(p1.id), rich - cost);
+  rig.ticks(TICK_HZ * 2);
+  assertEquals(Object.keys(p1.abilitySpent).length, 0, "skills were not restored");
+  assertEquals(players.canPowerRecharge(p1.id), false);
+
+  // Nothing spent now: a press costs nothing.
+  const after = ledger.get(p1.id);
+  while (ledger.get(p1.id) < cost) ledger.award(p1.id, "kill");
+  const stocked = ledger.get(p1.id);
+  assert(stocked >= after);
+  takeFromRack(rig, p1, rack);
+  assertEquals(ledger.get(p1.id), stocked);
 });
 
 // ── 5. revive ───────────────────────────────────────────────────────────────

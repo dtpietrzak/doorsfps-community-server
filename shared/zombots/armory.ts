@@ -10,7 +10,7 @@
 
 import { distanceSquared2 } from "../math/distance.ts";
 import { WEAPON_ORDER, WEAPON_PISTOL, WEAPON_RIFLE, WEAPON_SHOTGUN } from "../sim/weapons.ts";
-import type { ZombotsIntent, ZombotsPlayerId, ZombotsRackWeapon } from "./types.ts";
+import type { ZombotsIntent, ZombotsPlayerId, ZombotsRackKind, ZombotsRackWeapon } from "./types.ts";
 import { ZOMBOTS_TUNING } from "./zombotsTuning.ts";
 
 /** Sim weapon id for each rack kind. */
@@ -25,6 +25,14 @@ export type ZombotsGunRack = {
   weapon: ZombotsRackWeapon;
   center: { x: number; z: number };
 };
+
+/** Any rack on the map: a gun rack or a power recharge rack. */
+export type ZombotsRack = Omit<ZombotsGunRack, "weapon"> & { weapon: ZombotsRackKind };
+
+/** True for a rack that hangs a gun (the armory's), not the power rack. */
+export function isGunRackEntry(rack: ZombotsRack): rack is ZombotsGunRack {
+  return rack.weapon !== "power";
+}
 
 export type RackTakeRefusal = "outOfReach" | "downed" | "absent";
 

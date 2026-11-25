@@ -394,3 +394,49 @@ Deno.test("zombie brain: same inputs and rng produce the same action", () => {
   assertEquals(first.some((line) => line.includes('"shoot":true')), false);
   assertEquals(first.some((line) => line.includes('"melee":true')), true);
 });
+
+Deno.test("zombie brain: stuckWTurn peels out of window steer when blocked", () => {
+  // Minimal mock ZombieWindowNav that puts the zombie in a zombie closure
+  // right inside the window funnel so zombieWindowPlan returns kind: "steer".
+  const portal = {
+    windowId: "w1",
+    zombieRoom: 0,
+    playerRoom: 1,
+    center: { x: 0, z: 0 },
+    outX: 0,
+    outZ: 1,
+    field: [0],
+    exitCell: 0,
+  };
+  const nav = {
+    portals: [portal],
+    grid: { minX: -0.25, minZ: 0.75, nx: 1, nz: 1, room: [0], floor: [true] },
+    roomOf: () => 0,
+    isPlayerRoom: () => false,
+    doorCells: [],
+    openDoors: [],
+    chaseCells: [],
+    chaseFields: [],
+  };
+  const self = pawn("za", { isBot: true, team: "B", x: 0, z: 1.0, yaw: 0 });
+  const human = pawn("h", { team: "A", x: 0, z: -6 });
+  const bot = brain();
+  const state = emptyBotBrainState();
+  let peeled = false;
+  // Hold the bot at the same position for > 1.8s (108 sim ticks) of thinks.
+  for (let tick = 0; tick <= 150; tick += 3) {
+    bot.think(
+      world(tick, self, [self, human], { zombieWindows: nav, simDelta: 3 }),
+      state,
+    );
+    if (
+      typeof state.stuckWTurnTicksLeft === "number" &&
+      Number.isFinite(state.stuckWTurnTicksLeft) &&
+      state.stuckWTurnTicksLeft > 0
+    ) {
+      peeled = true;
+      break;
+    }
+  }
+  assertEquals(peeled, true, "expected stuckWTurn to trigger during window steer");
+});

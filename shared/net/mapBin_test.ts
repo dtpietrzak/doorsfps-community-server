@@ -1,3 +1,4 @@
+import { GUN_RACK_WEAPONS } from "../world/gunRacks.ts";
 import { assertEquals } from "@std/assert";
 import { ByteReader, ByteWriter } from "./bytes.ts";
 import { readMap, type WireDoorsMap, writeMap } from "./mapBin.ts";
@@ -64,6 +65,18 @@ Deno.test("gun racks round-trip on a zombots map", () => {
   assertEquals(back.mirrorMode, "zombots");
   assertEquals(back.spawnCorner, 2);
   assertEquals(back.doors, zombotsMap.doors);
+});
+
+Deno.test("a power rack round-trips and old weapon bytes stay put", () => {
+  const withPower = [
+    ...racks,
+    { id: "r4", wallId: "w1", center: { x: -3.5, z: 0 }, weapon: "power" as const },
+  ];
+  const back = readMap(new ByteReader(encode({ ...zombotsMap, gunRacks: withPower })));
+  assertEquals(back.gunRacks, withPower);
+  // Appended after shotgun: pistol / rifle / shotgun keep bytes 0 / 1 / 2.
+  assertEquals(GUN_RACK_WEAPONS.slice(0, 3), ["pistol", "rifle", "shotgun"]);
+  assertEquals(GUN_RACK_WEAPONS[3], "power");
 });
 
 Deno.test("rack faces round-trip, and racks without one keep their old bytes", () => {

@@ -7,17 +7,28 @@
  * {@link normalizeGunRacks} so a bad entry is dropped rather than failing the
  * whole map.
  */
-import type { ZombotsRackWeapon } from "../zombots/types.ts";
+import type { ZombotsRackKind, ZombotsRackWeapon } from "../zombots/types.ts";
 import { wallMountOffset } from "./slidingDoors.ts";
 
-/** Most gun racks one zombots map may carry. */
+/** Most racks (gun and power) one zombots map may carry. */
 export const MAX_GUN_RACKS = 16;
 
 /** Rack board width along the wall. Matches the training-ground rack. */
 export const GUN_RACK_WIDTH = 1.2;
 
-/** Wire order too: index is the weapon byte in `mapBin.ts`. */
-export const GUN_RACK_WEAPONS: readonly ZombotsRackWeapon[] = [
+/**
+ * Wire order too: index is the weapon byte in `mapBin.ts`. Append-only.
+ * `power` is the power recharge rack: same wall board, no gun.
+ */
+export const GUN_RACK_WEAPONS: readonly ZombotsRackKind[] = [
+  "pistol",
+  "rifle",
+  "shotgun",
+  "power",
+];
+
+/** The racks that hang a gun: every kind but `power`. */
+export const GUN_RACK_GUN_WEAPONS: readonly ZombotsRackWeapon[] = [
   "pistol",
   "rifle",
   "shotgun",
@@ -27,7 +38,7 @@ export type GunRack = {
   id: string;
   wallId: string;
   center: { x: number; z: number };
-  weapon: ZombotsRackWeapon;
+  weapon: ZombotsRackKind;
   /**
    * Which side of its wall the rack hangs on: 1 faces the wall's left normal
    * (`(-uz, ux)` for the unit direction a→b), -1 the right. Left out, the
@@ -50,8 +61,9 @@ type RackHostWall = {
   kind?: string;
 };
 
-export function isGunRackWeapon(value: unknown): value is ZombotsRackWeapon {
-  return value === "pistol" || value === "rifle" || value === "shotgun";
+export function isGunRackWeapon(value: unknown): value is ZombotsRackKind {
+  return value === "pistol" || value === "rifle" || value === "shotgun" ||
+    value === "power";
 }
 
 /**

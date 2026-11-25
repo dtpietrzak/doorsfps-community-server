@@ -31,13 +31,13 @@ export const WINDOW_CRAWL_SECONDS = 1.4;
 export const WINDOW_CRAWL_TICKS = Math.round(WINDOW_CRAWL_SECONDS * TICK_HZ);
 
 /** Minimum signed depth on the approach side to trigger a crawl (m). */
-export const WINDOW_CRAWL_TRIGGER_MIN_DEPTH = 0.25;
+export const WINDOW_CRAWL_TRIGGER_MIN_DEPTH = 0.05;
 
 /** Maximum signed depth on the approach side to trigger a crawl (m). */
-export const WINDOW_CRAWL_TRIGGER_MAX_DEPTH = 1.25;
+export const WINDOW_CRAWL_TRIGGER_MAX_DEPTH = 1.35;
 
 /** Max sideways offset from window center to start crawling (m). */
-export const WINDOW_CRAWL_TRIGGER_LATERAL = 0.45;
+export const WINDOW_CRAWL_TRIGGER_LATERAL = 0.62;
 
 /** Minimum dot product of movement intent toward the window opening. */
 export const WINDOW_CRAWL_TRIGGER_DOT = 0.25;
