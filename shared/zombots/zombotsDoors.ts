@@ -1,8 +1,10 @@
 /**
  * Zombots sliding-door state (notes/zombots.md, Phase 1 step 4).
  *
- * Which doors are open, the buy rule (reach, then cost), and which zombie
- * spawns the open doors make reachable. Pure: the purse lives elsewhere and
+ * Which doors are open, the buy rule (reach, then one charge of the cost),
+ * and which zombie spawns the open doors make reachable. Doors are paid in
+ * charges of `ZOMBOTS_TUNING.doors.chargeSize`; any player can pay any charge
+ * and the door opens once the charges cover its cost. Pure: the purse lives elsewhere and
  * comes in as a `spend` callback; collision is opened by the glue
  * (`MapCollision.openSlidingDoor`) when a `doorOpened` intent comes out.
  */
@@ -17,6 +19,7 @@ import { authoredWallSpans } from "../world/wallWindows.ts";
 import { MOVE_PLAYER_RADIUS } from "../sim/moveStep.ts";
 import { abs, ceil, clamp, distance2, distanceSquared2, floor, max, min } from "../math/index.ts";
 import type { ZombotsIntent, ZombotsPlayerId, ZombotsSpawnGate } from "./types.ts";
+import { ZOMBOTS_TUNING } from "./zombotsTuning.ts";
 
 type Vec2 = { x: number; z: number };
 
@@ -50,9 +53,37 @@ export type ZombotsDoorRefusal =
 
 export type ZombotsDoorOpened = Extract<ZombotsIntent, { kind: "doorOpened" }>;
 
+/**
+ * A paid charge. `charge` is what this press spent, `paid` the door's total
+ * so far. `intent` is set only on the charge that opened the door.
+ */
 export type ZombotsDoorOpenResult =
-  | { ok: true; doorId: string; cost: number; points: number; intent: ZombotsDoorOpened }
+  | {
+    ok: true;
+    doorId: string;
+    cost: number;
+    charge: number;
+    paid: number;
+    points: number;
+    intent: ZombotsDoorOpened | null;
+  }
   | { ok: false; reason: ZombotsDoorRefusal };
+
+/** A door's paid charges so far, for the HUD and checkpoints. */
+export type ZombotsDoorPaid = { doorId: string; paid: number };
+
+/**
+ * What the next press on a door costs: one charge, or what is left when that
+ * is less. 0 once the door is paid off.
+ */
+export function zombotsDoorCharge(
+  cost: number,
+  paid = 0,
+  chargeSize: number = ZOMBOTS_TUNING.doors.chargeSize,
+): number {
+  const left = max(0, cost - max(0, paid));
+  return chargeSize > 0 ? min(chargeSize, left) : left;
+}
 
 /** Purse debit. Must leave the purse alone when it returns `ok: false`. */
 export type ZombotsDoorSpend = (cost: number) => { ok: boolean; points: number };
@@ -60,6 +91,8 @@ export type ZombotsDoorSpend = (cost: number) => { ok: boolean; points: number }
 export class ZombotsDoorState {
   private readonly doors: ZombotsDoor[] = [];
   private readonly open = new Set<string>();
+  /** Door id → zompoints paid toward a door that is not open yet. */
+  private readonly paid = new Map<string, number>();
 
   constructor(map: ZombotsDoorMap) {
     const seen = new Set<string>();
@@ -100,10 +133,26 @@ export class ZombotsDoorState {
     return this.doors.filter((d) => this.open.has(d.id)).map((d) => d.id);
   }
 
+  /** Zompoints paid toward a closed door (0 when open or untouched). */
+  paidFor(doorId: string): number {
+    return this.paid.get(doorId) ?? 0;
+  }
+
+  /** Closed doors with at least one charge paid, map order. */
+  paidDoors(): ZombotsDoorPaid[] {
+    const out: ZombotsDoorPaid[] = [];
+    for (const d of this.doors) {
+      const paid = this.paid.get(d.id);
+      if (paid !== undefined && paid > 0) out.push({ doorId: d.id, paid });
+    }
+    return out;
+  }
+
   /**
-   * Buy a door. Checks run in a fixed order (unknown, already open, reach,
-   * cost) and `spend` is only called once everything else has passed, so a
-   * refused buy never touches the purse.
+   * Pay one charge toward a door, opening it when the charges cover its
+   * cost. Checks run in a fixed order (unknown, already open, reach, cost)
+   * and `spend` is only called once everything else has passed, so a refused
+   * press never touches the purse.
    */
   tryOpenDoor(
     playerId: ZombotsPlayerId,
@@ -115,15 +164,26 @@ export class ZombotsDoorState {
     if (!door) return { ok: false, reason: "unknown" };
     if (this.open.has(doorId)) return { ok: false, reason: "alreadyOpen" };
     if (!withinDoorReach(door, eye)) return { ok: false, reason: "outOfReach" };
-    const paid = spend(door.cost);
-    if (!paid.ok) return { ok: false, reason: "cantAfford" };
-    this.open.add(doorId);
+    const before = this.paidFor(doorId);
+    const charge = zombotsDoorCharge(door.cost, before);
+    const spent = spend(charge);
+    if (!spent.ok) return { ok: false, reason: "cantAfford" };
+    const paid = before + charge;
+    const opened = paid >= door.cost;
+    if (opened) {
+      this.paid.delete(doorId);
+      this.open.add(doorId);
+    } else {
+      this.paid.set(doorId, paid);
+    }
     return {
       ok: true,
       doorId,
       cost: door.cost,
-      points: paid.points,
-      intent: { kind: "doorOpened", doorId, by: playerId },
+      charge,
+      paid,
+      points: spent.points,
+      intent: opened ? { kind: "doorOpened", doorId, by: playerId } : null,
     };
   }
 
@@ -133,6 +193,7 @@ export class ZombotsDoorState {
    */
   markOpen(doorId: string): boolean {
     if (!this.door(doorId) || this.open.has(doorId)) return false;
+    this.paid.delete(doorId);
     this.open.add(doorId);
     return true;
   }

@@ -64,6 +64,8 @@ export type BotWorldView = {
   matchOver?: boolean;
   /** Zombots floor nav: windows and chase fields (step 9a). Null elsewhere. */
   zombieWindows?: ZombieWindowNav | null;
+  /** Active dis-rack-tor lure point: zombies head here instead of humans. */
+  zombieLure?: { x: number; z: number } | null;
 };
 
 /** One sim tick of look inside a bot period (see {@link BotAction.lookSamples}). */

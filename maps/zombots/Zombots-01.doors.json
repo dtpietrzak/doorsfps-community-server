@@ -990,6 +990,15 @@
       },
       "weapon": "power",
       "face": -1
+    },
+    {
+      "id": "rack_5zs3w9yd",
+      "wallId": "w_14srjoc2",
+      "center": {
+        "x": -23,
+        "z": 15
+      },
+      "weapon": "distractor"
     }
   ],
   "mirrorMode": "zombots",

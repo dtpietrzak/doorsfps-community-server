@@ -12,6 +12,7 @@ import type { ReviveTracker } from "./revive.ts";
 import type { ZombotsIntent, ZombotsPhase, ZombotsPlayerId } from "./types.ts";
 import type { ZombotsMatch } from "./ZombotsMatch.ts";
 import type { ZompointsLedger } from "./zompoints.ts";
+import type { ZombotsDoorPaid } from "./zombotsDoors.ts";
 
 /** One human in the run, join order. */
 export type ZombotsHudPlayer = {
@@ -39,11 +40,22 @@ export type ZombotsHudPacket = {
   nextWaveAtTick: number;
   /** Opened sliding doors, map order. Only ever grows within a run. */
   openDoorIds: string[];
+  /**
+   * Shut doors with charges paid toward them, map order. Doors are bought in
+   * `ZOMBOTS_TUNING.doors.chargeSize` charges any player can pay.
+   */
+  doorPaid: ZombotsDoorPaid[];
   players: ZombotsHudPlayer[];
   /** Only revives with at least one paid press. */
   revives: ZombotsHudRevive[];
   /** What happened since the previous block. Omitted when nothing did. */
   events?: ZombotsFeedEvent[];
+  /** How many times a dis-rack-tor has been activated this run. Omitted when 0. */
+  distractorUses?: number;
+  /** Sim tick the active dis-rack-tor lure ends. Omitted when inactive. */
+  distractorEndsAtTick?: number;
+  /** Rack id of the currently active dis-rack-tor. Present with `distractorEndsAtTick`. */
+  distractorRackId?: string;
 };
 
 /**
@@ -55,8 +67,12 @@ export function buildZombotsHud(input: {
   ledger: ZompointsLedger;
   revive: ReviveTracker;
   openDoorIds: readonly string[];
+  doorPaid?: readonly ZombotsDoorPaid[];
   nextWaveAtTick: number;
   events?: readonly ZombotsFeedEvent[];
+  distractorUses?: number;
+  distractorEndsAtTick?: number;
+  distractorRackId?: string;
 }): ZombotsHudPacket {
   const { match, ledger, revive } = input;
   const players: ZombotsHudPlayer[] = [];
@@ -75,9 +91,17 @@ export function buildZombotsHud(input: {
     zombiesLeft: match.zombiesLeft,
     nextWaveAtTick,
     openDoorIds: [...input.openDoorIds],
+    doorPaid: (input.doorPaid ?? []).map((d) => ({ doorId: d.doorId, paid: d.paid })),
     players,
     revives,
   };
   if (input.events && input.events.length > 0) packet.events = [...input.events];
+  if (input.distractorUses && input.distractorUses > 0) {
+    packet.distractorUses = input.distractorUses;
+  }
+  if (input.distractorEndsAtTick && input.distractorEndsAtTick > 0) {
+    packet.distractorEndsAtTick = input.distractorEndsAtTick;
+    if (input.distractorRackId) packet.distractorRackId = input.distractorRackId;
+  }
   return packet;
 }

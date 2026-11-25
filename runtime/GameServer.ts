@@ -520,6 +520,7 @@ export class GameServer implements ReplayIntegrationSinkHandle {
         spawnZombie: (spec) => this.bots.spawnZombie(spec),
         despawnZombie: (id) => this.bots.despawnZombie(id),
         clearZombies: () => this.bots.clearZombies(),
+        setZombieLure: (point) => this.bots.setZombieLure(point),
       },
       sessions: () => this.sessions,
       map: () => this.map,

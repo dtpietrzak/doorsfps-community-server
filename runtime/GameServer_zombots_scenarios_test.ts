@@ -17,7 +17,7 @@ import {
   WEAPON_PISTOL,
 } from "../protocol/network.ts";
 import { spareClipsForWeapon } from "../shared/sim/weapons.ts";
-import { ZOMBOTS_RACK_WEAPON_ID } from "../shared/zombots/armory.ts";
+import { gunRackCost, ZOMBOTS_RACK_WEAPON_ID } from "../shared/zombots/armory.ts";
 import type { ZombotsHudPacket } from "../shared/zombots/zombotsHud.ts";
 import { ZombotsDoorState, zombotsRoomGraph } from "../shared/zombots/zombotsDoors.ts";
 import { zombotsLayout } from "../shared/zombots/zombotsLayout.ts";
@@ -277,11 +277,13 @@ function takeFromRack(
   /** Top the purse up to a gun rack's price first (power racks are funded by their test). */
   fund = rack.weapon !== "power",
 ) {
-  if (fund) {
+  if (fund && (rack.weapon === "pistol" || rack.weapon === "rifle" || rack.weapon === "shotgun")) {
     const ledger = (rig.internals.zombotsRuntime as unknown as {
       run: { ledger: { get(id: string): number; award(id: string, reason: string): unknown } };
     }).run.ledger;
-    while (ledger.get(player.id) < T.racks.gunCost) ledger.award(player.id, "kill");
+    const weaponId = ZOMBOTS_RACK_WEAPON_ID[rack.weapon];
+    const needed = gunRackCost(weaponId, false, 0);
+    while (ledger.get(player.id) < needed) ledger.award(player.id, "kill");
   }
   rig.stand(player, {
     x: rack.center.x + rack.facing.x * 1.0,
@@ -364,8 +366,11 @@ Deno.test("zombots scenario: all humans down ends the run, nobody respawns, the 
   }).run.ledger;
   while (ledger.get("sock-Alpha") < gate.door.cost) ledger.award("sock-Alpha", "kill");
   rig.stand(a, gate.low, yawToward(sub(gate.door.reachPoint, gate.low)));
-  rig.send("Alpha", NetEvents.Interact, { yaw: a.yaw, pitch: 0 });
-  rig.tickOnce();
+  // One charge per press until the door is paid off.
+  for (let c = 0; c < Math.ceil(gate.door.cost / ZOMBOTS_TUNING.doors.chargeSize); c++) {
+    rig.send("Alpha", NetEvents.Interact, { yaw: a.yaw, pitch: 0 });
+    rig.tickOnce();
+  }
   const collision = rig.internals.players.getCollision();
   assertEquals(collision.isSlidingDoorOpen(gate.door.id), true);
   const waveReached = rig.hud().wave;
@@ -466,19 +471,29 @@ Deno.test("zombots scenario: a door buy debits the purse and opens the door for 
   walk();
   assertEquals(facts.layout.phaseOf({ x: walker.x, z: walker.z }), 1, "walked through a shut door");
 
-  // The buyer earns enough for the door, pays, and the purse drops by exactly the door cost.
-  assertEquals(gate.door.cost, 500);
+  // The 2000 door is two 1000 charges: the buyer pays one, the walker the other.
+  const charge = ZOMBOTS_TUNING.doors.chargeSize;
+  assertEquals(gate.door.cost, 2 * charge);
   const ledger = (rig.internals.zombotsRuntime as unknown as {
     run: { ledger: { get(id: string): number; award(id: string, reason: string): unknown } };
   }).run.ledger;
-  while (ledger.get("sock-Alpha") < gate.door.cost) ledger.award("sock-Alpha", "kill");
+  while (ledger.get("sock-Alpha") < charge) ledger.award("sock-Alpha", "kill");
+  while (ledger.get("sock-Bravo") < charge) ledger.award("sock-Bravo", "kill");
   const beforeAlpha = rig.points("sock-Alpha");
   const beforeBravo = rig.points("sock-Bravo");
   rig.stand(buyer, gate.low, toDoor(gate.low));
   rig.send("Alpha", NetEvents.Interact, { yaw: buyer.yaw, pitch: 0 });
   rig.tickOnce();
-  assertEquals(beforeAlpha - rig.points("sock-Alpha"), gate.door.cost);
+  assertEquals(beforeAlpha - rig.points("sock-Alpha"), charge);
   assertEquals(rig.points("sock-Bravo"), beforeBravo, "the other purse must not move");
+  assertEquals(collision.isSlidingDoorOpen(gate.door.id), false, "half paid must stay shut");
+  assertEquals(rig.hud().doorPaid, [{ doorId: gate.door.id, paid: charge }]);
+  rig.stand(walker, gate.low, toDoor(gate.low));
+  rig.send("Bravo", NetEvents.Interact, { yaw: walker.yaw, pitch: 0 });
+  rig.tickOnce();
+  assertEquals(beforeBravo - rig.points("sock-Bravo"), charge);
+  assertEquals(rig.points("sock-Alpha"), beforeAlpha - charge);
+  assertEquals(rig.hud().doorPaid, []);
   assertEquals(collision.isSlidingDoorOpen(gate.door.id), true);
   assertEquals(rig.hud().openDoorIds, [gate.door.id]);
   assertEquals(botThinkFrame(rig.server, rig.tick).openSlidingDoorIds, [gate.door.id]);
@@ -490,7 +505,7 @@ Deno.test("zombots scenario: a door buy debits the purse and opens the door for 
   // Another player now walks through it.
   walk();
   assertEquals(facts.layout.phaseOf({ x: walker.x, z: walker.z }), 2, "the open door did not let the walker through");
-  assertEquals(rig.points("sock-Bravo"), beforeBravo);
+  assertEquals(rig.points("sock-Bravo"), beforeBravo - charge);
 });
 
 Deno.test("zombots scenario: a broke player's door buy is refused", async () => {
@@ -571,7 +586,7 @@ Deno.test("zombots scenario: unarmed players can't fire until they take from the
   assertEquals(p1.armedMask(), 1 << WEAPON_PISTOL);
 });
 
-Deno.test("zombots scenario: a gun rack use costs 100, and full spare mags are refused for free", async () => {
+Deno.test("zombots scenario: a gun rack costs 20 per mag, and full spare mags are refused for free", async () => {
   const rig = await makeRig();
   const facts = mapFacts(rig.map);
   const [p1] = startWave1(rig, "Alpha");
@@ -586,19 +601,21 @@ Deno.test("zombots scenario: a gun rack use costs 100, and full spare mags are r
     };
   }).run.ledger;
   const fullSpares = spareClipsForWeapon(WEAPON_PISTOL);
+  const firstTakeCost = gunRackCost(WEAPON_PISTOL, false, 0);
+  assertEquals(firstTakeCost, 60);
 
-  // Short of 100: nothing happens.
+  // Short of 60: nothing happens.
   ledger.trySpend(p1.id, ledger.get(p1.id), "door");
   assertEquals(ledger.get(p1.id), 0);
   takeFromRack(rig, p1, rack, false);
   assertEquals(p1.armedMask(), 0);
 
-  // First take pays 100.
+  // First take pays 60 (3 mags * 20).
   while (ledger.get(p1.id) < 250) ledger.award(p1.id, "kill");
   const before = ledger.get(p1.id);
   takeFromRack(rig, p1, rack, false);
   assertEquals(p1.armedMask(), 1 << WEAPON_PISTOL);
-  assertEquals(ledger.get(p1.id), before - T.racks.gunCost);
+  assertEquals(ledger.get(p1.id), before - firstTakeCost);
 
   // Spares are full: refused, nothing charged.
   const afterTake = ledger.get(p1.id);
@@ -607,24 +624,32 @@ Deno.test("zombots scenario: a gun rack use costs 100, and full spare mags are r
   takeFromRack(rig, p1, rack, false);
   assertEquals(ledger.get(p1.id), afterTake);
 
-  // Use a spare mag: the next use refills the spares for 100.
+  // Use 1 spare mag: refill costs 20 (1 mag * 20).
   (p1 as unknown as { loadouts: Record<number, { spareClips: number }> })
     .loadouts[WEAPON_PISTOL]!.spareClips = fullSpares - 1;
   assertEquals(p1.spareClipsFor(WEAPON_PISTOL), fullSpares - 1);
   takeFromRack(rig, p1, rack, false);
-  assertEquals(ledger.get(p1.id), afterTake - T.racks.gunCost);
+  assertEquals(ledger.get(p1.id), afterTake - T.racks.gunCostPerMag);
+  assertEquals(p1.spareClipsFor(WEAPON_PISTOL), fullSpares);
+
+  // Use all spare mags: refill costs 40 (2 mags * 20).
+  const afterOne = ledger.get(p1.id);
+  (p1 as unknown as { loadouts: Record<number, { spareClips: number }> })
+    .loadouts[WEAPON_PISTOL]!.spareClips = 0;
+  takeFromRack(rig, p1, rack, false);
+  assertEquals(ledger.get(p1.id), afterOne - fullSpares * T.racks.gunCostPerMag);
   assertEquals(p1.spareClipsFor(WEAPON_PISTOL), fullSpares);
 });
 
 // ── 4b. power recharge rack ─────────────────────────────────────────────────
 
-Deno.test("zombots scenario: a power rack restores spent skills for 500 zompoints, and never charges for nothing", async () => {
+Deno.test("zombots scenario: a power rack restores spent skills for 300 zompoints, and never charges for nothing", async () => {
   const rig = await makeRig({ powerRack: true });
   const facts = mapFacts(rig.map);
   const [p1] = startWave1(rig, "Alpha");
   const rack = facts.rackOf("power");
   const cost = T.racks.powerCost;
-  assertEquals(cost, 500);
+  assertEquals(cost, 300);
   const ledger = (rig.internals.zombotsRuntime as unknown as {
     run: { ledger: { get(id: string): number; award(id: string, reason: string): unknown } };
   }).run.ledger;

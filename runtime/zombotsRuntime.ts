@@ -28,7 +28,18 @@ import {
   NetEvents,
   type TeamId,
 } from "../protocol/network.ts";
-import { Armory, isGunRackEntry, withinRackReach, ZOMBOTS_RACK_WEAPON_ID, type ZombotsRack } from "../shared/zombots/armory.ts";
+import {
+  Armory,
+  gunRackCost,
+  isGunRackEntry,
+  withinRackReach,
+  ZOMBOTS_RACK_WEAPON_ID,
+  type ZombotsRack,
+} from "../shared/zombots/armory.ts";
+import {
+  distractorLurePoint,
+  DistractorTracker,
+} from "../shared/zombots/distractorRack.ts";
 import { tryPowerRecharge } from "../shared/zombots/powerRack.ts";
 import { ReviveTracker } from "../shared/zombots/revive.ts";
 import type {
@@ -96,6 +107,8 @@ export type ZombotsBotPort = {
    * starts on a fresh collision with every door shut.
    */
   clearZombies(): void;
+  /** Set or clear the active dis-rack-tor lure point for zombie pathing. */
+  setZombieLure?(point: { x: number; z: number } | null): void;
 };
 
 export type ZombotsRuntimeDeps = {
@@ -141,6 +154,7 @@ type Run = {
   revive: ReviveTracker;
   armory: Armory;
   doors: ZombotsDoorState;
+  distractor: DistractorTracker;
 };
 
 /** Per-zombie stuck-detection state for soft relocate + timeout kill. */
@@ -220,13 +234,7 @@ export class ZombotsRuntime {
   hud(): ZombotsHudPacket | null {
     const run = this.run;
     if (!run) return null;
-    return buildZombotsHud({
-      match: run.match,
-      ledger: run.ledger,
-      revive: run.revive,
-      openDoorIds: run.doors.openIds(),
-      nextWaveAtTick: this.nextWaveAtTick,
-    });
+    return this.buildHud(run);
   }
 
   /** NON-SIM: send the HUD block when it changed this tick. */
@@ -239,16 +247,29 @@ export class ZombotsRuntime {
       this.feed = [];
       return;
     }
-    const packet = buildZombotsHud({
+    const packet = this.buildHud(run, this.feed);
+    this.feed = [];
+    sessions?.emit(NetEvents.ZombotsState, packet);
+  }
+
+  private buildHud(run: Run, events?: readonly ZombotsFeedEvent[]): ZombotsHudPacket {
+    const activeDistractor = run.distractor.activeAt(this.deps.players.tick);
+    return buildZombotsHud({
       match: run.match,
       ledger: run.ledger,
       revive: run.revive,
       openDoorIds: run.doors.openIds(),
+      doorPaid: run.doors.paidDoors(),
       nextWaveAtTick: this.nextWaveAtTick,
-      events: this.feed,
+      ...(events ? { events } : {}),
+      distractorUses: run.distractor.uses,
+      ...(activeDistractor
+        ? {
+          distractorEndsAtTick: activeDistractor.endsAtTick,
+          distractorRackId: activeDistractor.rackId,
+        }
+        : {}),
     });
-    this.feed = [];
-    sessions?.emit(NetEvents.ZombotsState, packet);
   }
 
   // ── sim ──────────────────────────────────────────────────────────────────
@@ -276,10 +297,14 @@ export class ZombotsRuntime {
       this.resetIdle();
       return result;
     }
+    if (run.distractor.expire(tick)) {
+      this.deps.bots.setZombieLure?.(null);
+      this.hudDirty = true;
+    }
     this.collectCombat(run, outcomes, events, tick);
     this.collectDowns(run, events);
     this.observeLooks(run);
-    this.resolveInteracts(run, nowMs, result.facts);
+    this.resolveInteracts(run, tick, nowMs, result.facts);
 
     const gate = zombotsSpawnGate(this.plan!.layout, this.unlockedPhases(run));
     this.watchStuckZombies(run, gate, tick, events);
@@ -388,6 +413,7 @@ export class ZombotsRuntime {
         return row ? [{ reviverId: id, targetId: row.targetId, presses: row.presses }] : [];
       }),
       armed: humans.map((id) => ({ id, weapons: run.armory.armedWeapons(id) })),
+      doorPaid: run.doors.paidDoors(),
       zombies: [...this.zombies],
     };
   }
@@ -397,6 +423,7 @@ export class ZombotsRuntime {
   /** Rules objects, zombies, collision and armed sets for a new run. */
   private freshRun(): void {
     this.deps.bots.clearZombies();
+    this.deps.bots.setZombieLure?.(null);
     this.zombies.clear();
     this.zombieWatch.clear();
     this.zombieSeq = 0;
@@ -429,6 +456,7 @@ export class ZombotsRuntime {
       revive: new ReviveTracker(),
       armory: new Armory(),
       doors: new ZombotsDoorState(map),
+      distractor: new DistractorTracker(),
     };
     this.hudDirty = true;
     this.lastHudKey = "";
@@ -546,6 +574,10 @@ export class ZombotsRuntime {
     const cx = (map.bounds.minX + map.bounds.maxX) / 2;
     const cz = (map.bounds.minZ + map.bounds.maxZ) / 2;
 
+    const activeLure = run.distractor.activeAt(tick)?.point ?? null;
+    // Zombies gathered around an active dis-rack-tor are intentionally holding.
+    const lureHoldRadius2 = 4.5 * 4.5;
+
     for (const id of [...this.zombies]) {
       const p = this.deps.players.get(id);
       if (!p || !p.alive) continue;
@@ -562,6 +594,17 @@ export class ZombotsRuntime {
         };
         this.zombieWatch.set(id, w);
         continue;
+      }
+
+      if (activeLure !== null) {
+        const ldx = p.x - activeLure.x;
+        const ldz = p.z - activeLure.z;
+        if (ldx * ldx + ldz * ldz <= lureHoldRadius2) {
+          w.lastProgressTick = tick;
+          w.stagnantSinceTick = tick;
+          w.lastHealth = p.health;
+          continue;
+        }
       }
 
       const lifetimeMs = (tick - w.spawnedAtTick) * TICK_MS;
@@ -697,6 +740,7 @@ export class ZombotsRuntime {
   /** Interacts in ascending player id, the Weapons queue's order. */
   private resolveInteracts(
     run: Run,
+    tick: number,
     nowMs: number,
     facts: ZombotsSimFact[],
   ): void {
@@ -729,7 +773,7 @@ export class ZombotsRuntime {
           this.buyDoor(run, id, target.doorId, eye, facts);
           break;
         case "rack":
-          this.takeRack(run, id, target.rackId, eye, facts);
+          this.takeRack(run, id, target.rackId, eye, tick, facts);
           break;
       }
     }
@@ -784,12 +828,15 @@ export class ZombotsRuntime {
       return { ok: spent.ok, points: spent.points };
     });
     if (!bought.ok) return;
-    this.feed.push(...paid, bought.intent);
+    this.feed.push(...paid);
+    this.hudDirty = true;
+    // A charge short of the cost: the HUD shows the door's progress.
+    if (!bought.intent) return;
+    this.feed.push(bought.intent);
     // Both server collisions: the sim's here, the bot engine's through the
     // open-door list in its next think frame.
     this.deps.players.getCollision().openSlidingDoor(doorId);
     facts.push({ op: "doorOpened", doorId, by: playerId });
-    this.hudDirty = true;
   }
 
   private takeRack(
@@ -797,12 +844,18 @@ export class ZombotsRuntime {
     playerId: string,
     rackId: string,
     eye: { x: number; z: number },
+    tick: number,
     facts: ZombotsSimFact[],
   ): void {
-    const rack = this.plan!.racks.find((r) => r.rack.id === rackId)?.rack;
-    if (!rack) return;
+    const entry = this.plan!.racks.find((r) => r.rack.id === rackId);
+    if (!entry) return;
+    const rack = entry.rack;
     if (!isGunRackEntry(rack)) {
-      this.usePowerRack(run, playerId, rack, eye, facts);
+      if (rack.weapon === "distractor") {
+        this.useDistractorRack(run, playerId, entry, eye, tick);
+      } else {
+        this.usePowerRack(run, playerId, rack, eye, facts);
+      }
       return;
     }
     // Pre-checks the armory repeats, so nothing is charged for a refusal.
@@ -810,12 +863,14 @@ export class ZombotsRuntime {
     if (downed || !withinRackReach(rack.center, eye)) return;
     const weaponId = ZOMBOTS_RACK_WEAPON_ID[rack.weapon];
     const players = this.deps.players;
-    if (players.hasFullSpareClips(playerId, weaponId)) {
+    const armed = run.armory.isArmed(playerId, weaponId);
+    const cost = gunRackCost(weaponId, armed, players.spareClipsFor(playerId, weaponId));
+    if (players.hasFullSpareClips(playerId, weaponId) || cost <= 0) {
       this.feed.push({ kind: "rackRefused", playerId, rackId });
       this.hudDirty = true;
       return;
     }
-    const spent = run.ledger.trySpend(playerId, ZOMBOTS_TUNING.racks.gunCost, "gunRack");
+    const spent = run.ledger.trySpend(playerId, cost, "gunRack");
     if (!spent.ok) return;
     this.feed.push(spent.intent);
     const taken = run.armory.tryTakeFromRack(
@@ -870,6 +925,38 @@ export class ZombotsRuntime {
     this.feed.push(...paid);
     players.powerRechargePlayer(playerId);
     facts.push({ op: "powerRecharged", playerId });
+    this.hudDirty = true;
+  }
+
+  /**
+   * Dis-rack-tor rack: pay escalating zompoints (2000 + 500 per prior use)
+   * and lure every zombie to the floor in front of this rack for 1 minute.
+   */
+  private useDistractorRack(
+    run: Run,
+    playerId: string,
+    entry: ZombotsInteractRack,
+    eye: { x: number; z: number },
+    tick: number,
+  ): void {
+    const paid: ZombotsFeedEvent[] = [];
+    const result = run.distractor.tryActivate({
+      rackId: entry.rack.id,
+      rackCenter: entry.rack.center,
+      lurePoint: distractorLurePoint(entry.rack.center, entry.facing),
+      eye,
+      isDowned: run.match.downed.has(playerId),
+      tick,
+      durationTicks: Math.round(ZOMBOTS_TUNING.racks.distractorDurationMs / TICK_MS),
+      trySpend: (cost) => {
+        const spent = run.ledger.trySpend(playerId, cost, "distractor");
+        if (spent.ok) paid.push(spent.intent);
+        return spent;
+      },
+    });
+    if (result.kind !== "ok") return;
+    this.feed.push(...paid);
+    this.deps.bots.setZombieLure?.(result.point);
     this.hudDirty = true;
   }
 
@@ -968,6 +1055,7 @@ export class ZombotsRuntime {
   ): GameOverPacket | null {
     this.feed.push(intent);
     this.hudDirty = true;
+    this.deps.bots.setZombieLure?.(null);
     for (const id of [...this.zombies]) this.removeZombie(id);
     // Zombies win a wipe. Restart seconds are the default intermission.
     return this.deps.players.forceEndMatch(tick, ZOMBOTS_ZOMBIE_TEAM, {
@@ -988,13 +1076,7 @@ export class ZombotsRuntime {
     const run = this.run;
     if (!run) return;
     if (this.feed.length > 0) this.hudDirty = true;
-    const hud = buildZombotsHud({
-      match: run.match,
-      ledger: run.ledger,
-      revive: run.revive,
-      openDoorIds: run.doors.openIds(),
-      nextWaveAtTick: this.nextWaveAtTick,
-    });
+    const hud = this.buildHud(run);
     const key = JSON.stringify(hud);
     if (key !== this.lastHudKey) {
       this.lastHudKey = key;

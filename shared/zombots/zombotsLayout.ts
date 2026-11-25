@@ -111,8 +111,9 @@ const RACK_PHASE: Record<ZombotsRackKind, ZombotsLayoutPhase> = {
   pistol: 1,
   rifle: 2,
   shotgun: 3,
-  // The power rack restores skills, which any phase may need.
+  // Utility racks (power recharge and dis-rack-tor) may hang in any phase.
   power: 1,
+  distractor: 1,
 };
 
 /** "phase 3" / "phase 2 or later" / "any phase", for rack messages. */

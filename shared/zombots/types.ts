@@ -20,10 +20,11 @@ export type ZombotsSpawnPoint = { id: string; p: { x: number; z: number } };
 export type ZombotsRackWeapon = "pistol" | "rifle" | "shotgun";
 
 /**
- * What a rack hangs. A gun, or `power`: the power recharge rack, which
- * restores the player's spent skills for zompoints (`powerRack.ts`).
+ * What a rack hangs. A gun, `power` (restores spent skills, `powerRack.ts`),
+ * or `distractor` (the dis-rack-tor: lures all zombies to itself for 1 minute,
+ * `distractorRack.ts`).
  */
-export type ZombotsRackKind = ZombotsRackWeapon | "power";
+export type ZombotsRackKind = ZombotsRackWeapon | "power" | "distractor";
 
 /**
  * Side effects the rules ask the glue to perform. The rules never perform
@@ -60,6 +61,7 @@ export type ZombotsPointsReason =
   | "revivePress"
   | "powerRecharge"
   | "gunRack"
+  | "distractor"
   | "start";
 
 /** Game events the glue feeds into the rules each tick. */

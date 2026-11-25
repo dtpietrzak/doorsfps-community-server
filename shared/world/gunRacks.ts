@@ -18,13 +18,14 @@ export const GUN_RACK_WIDTH = 1.2;
 
 /**
  * Wire order too: index is the weapon byte in `mapBin.ts`. Append-only.
- * `power` is the power recharge rack: same wall board, no gun.
+ * `power` is the power recharge rack; `distractor` is the dis-rack-tor.
  */
 export const GUN_RACK_WEAPONS: readonly ZombotsRackKind[] = [
   "pistol",
   "rifle",
   "shotgun",
   "power",
+  "distractor",
 ];
 
 /** The racks that hang a gun: every kind but `power`. */
@@ -63,7 +64,7 @@ type RackHostWall = {
 
 export function isGunRackWeapon(value: unknown): value is ZombotsRackKind {
   return value === "pistol" || value === "rifle" || value === "shotgun" ||
-    value === "power";
+    value === "power" || value === "distractor";
 }
 
 /**

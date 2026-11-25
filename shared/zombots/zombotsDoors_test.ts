@@ -4,6 +4,7 @@ import {
   roomSpawnGate,
   spawnGate,
   type ZombotsDoorMap,
+  zombotsDoorCharge,
   ZombotsDoorState,
   zombieSpawnDoorRequirements,
   zombotsRoomGraph,
@@ -82,6 +83,8 @@ Deno.test("tryOpenDoor refuses in order and only spends after reach passes", () 
     ok: true,
     doorId: "d1",
     cost: 500,
+    charge: 500,
+    paid: 500,
     points: 100,
     intent: { kind: "doorOpened", doorId: "d1", by: "p1" },
   });
@@ -98,6 +101,65 @@ Deno.test("tryOpenDoor refuses in order and only spends after reach passes", () 
   assertEquals(wallet.calls, [500, 750]);
   assertEquals(wallet.points, 100);
   assertEquals(state.isOpen("d2"), false);
+});
+
+Deno.test("zombotsDoorCharge is one charge, or what is left", () => {
+  assertEquals(zombotsDoorCharge(500), 500);
+  assertEquals(zombotsDoorCharge(2000), 1000);
+  assertEquals(zombotsDoorCharge(2000, 1000), 1000);
+  assertEquals(zombotsDoorCharge(2500, 2000), 500);
+  assertEquals(zombotsDoorCharge(2000, 2000), 0);
+  assertEquals(zombotsDoorCharge(0), 0);
+});
+
+Deno.test("doors over one charge open after enough charges, from anyone", () => {
+  const state = new ZombotsDoorState(rooms({
+    doors: [{ id: "big", wallId: "w1", center: { x: -5, z: 0 }, cost: 4000 }],
+  }));
+  const eye = { x: -5, z: -1 };
+  const alpha = purse(2500);
+  const bravo = purse(2000);
+
+  const first = state.tryOpenDoor("alpha", "big", eye, alpha.spend);
+  assertEquals(first, {
+    ok: true,
+    doorId: "big",
+    cost: 4000,
+    charge: 1000,
+    paid: 1000,
+    points: 1500,
+    intent: null,
+  });
+  assertEquals(state.isOpen("big"), false);
+  assertEquals(state.paidDoors(), [{ doorId: "big", paid: 1000 }]);
+
+  assertEquals(state.tryOpenDoor("bravo", "big", eye, bravo.spend).ok, true);
+  assertEquals(state.tryOpenDoor("alpha", "big", eye, alpha.spend).ok, true);
+  assertEquals(state.paidFor("big"), 3000);
+  // Short of a charge: refused, nothing paid.
+  assertEquals(state.tryOpenDoor("alpha", "big", eye, alpha.spend), { ok: false, reason: "cantAfford" });
+  assertEquals(alpha.points, 500);
+  assertEquals(state.paidFor("big"), 3000);
+
+  const last = state.tryOpenDoor("bravo", "big", eye, bravo.spend);
+  assertEquals(last.ok && last.intent, { kind: "doorOpened", doorId: "big", by: "bravo" });
+  assertEquals(state.isOpen("big"), true);
+  assertEquals(state.paidDoors(), []);
+  assertEquals(bravo.calls, [1000, 1000]);
+  assertEquals(bravo.points, 0);
+});
+
+Deno.test("a 2000 door is two 1000 charges, both payable by one player", () => {
+  const state = new ZombotsDoorState(rooms({
+    doors: [{ id: "d", wallId: "w1", center: { x: -5, z: 0 }, cost: 2000 }],
+  }));
+  const solo = purse(2000);
+  const eye = { x: -5, z: -1 };
+  assertEquals(state.tryOpenDoor("p", "d", eye, solo.spend).ok, true);
+  assertEquals(state.isOpen("d"), false);
+  assertEquals(state.tryOpenDoor("p", "d", eye, solo.spend).ok, true);
+  assertEquals(state.isOpen("d"), true);
+  assertEquals(solo.calls, [1000, 1000]);
 });
 
 Deno.test("openIds is map order whatever order doors were bought in", () => {

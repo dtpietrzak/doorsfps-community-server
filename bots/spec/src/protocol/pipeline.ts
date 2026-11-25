@@ -847,19 +847,23 @@ function readPlayer(reader: Reader): PlayerSnapshot {
 }
 
 /**
- * Bit on the doors byte. Old frames store 0 or 1 there and end at matchOver,
- * so they still decode with the list absent. An empty list sets the bit and
- * writes a zero count, which is not the same as leaving it off.
+ * Bits on the doors byte. Old frames store 0 or 1 there and end at matchOver,
+ * so they still decode with the trailing fields absent. An empty open-doors
+ * list sets bit 1 and writes a zero count, which is not the same as leaving
+ * it off. Bit 2 appends a zombots dis-rack-tor lure point.
  */
 const FRAME_OPEN_SLIDING_DOORS = 2;
+const FRAME_ZOMBIE_LURE = 4;
 
 function writeFrame(writer: Writer, frame: ThinkFrame): void {
   writer.u32(frame.tick);
   writer.f64(frame.simDelta);
   writer.string(frame.mapRevision);
   const openIds = frame.openSlidingDoorIds;
+  const lure = frame.zombieLure;
   let doorByte = frame.doorsOpen ? 1 : 0;
   if (openIds !== undefined) doorByte |= FRAME_OPEN_SLIDING_DOORS;
+  if (lure !== undefined) doorByte |= FRAME_ZOMBIE_LURE;
   writer.u8(doorByte);
   writer.i32(frame.doorChangeTick ?? NULL_I32);
   writer.i32(frame.teamScoreA);
@@ -875,6 +879,9 @@ function writeFrame(writer: Writer, frame: ThinkFrame): void {
     for (let index = 0; index < openIds.length; index += 1) {
       writer.string(openIds[index]!);
     }
+  }
+  if (lure !== undefined) {
+    writePoint(writer, lure);
   }
 }
 
@@ -901,6 +908,9 @@ function readFrame(reader: Reader): ThinkFrame {
       openSlidingDoorIds.push(reader.string());
     }
   }
+  const zombieLure = (doorByte & FRAME_ZOMBIE_LURE) !== 0
+    ? readPoint(reader)
+    : undefined;
   return {
     tick,
     simDelta,
@@ -912,6 +922,7 @@ function readFrame(reader: Reader): ThinkFrame {
     players,
     ...(openSlidingDoorIds !== undefined ? { openSlidingDoorIds } : {}),
     ...(matchOver ? { matchOver: true } : {}),
+    ...(zombieLure !== undefined ? { zombieLure } : {}),
   };
 }
 

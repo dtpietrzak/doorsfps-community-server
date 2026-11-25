@@ -1248,6 +1248,7 @@ const ZOMBOTS_POINT_REASONS = [
   "start",
   "powerRecharge",
   "gunRack",
+  "distractor",
 ] as const;
 const ZOMBOTS_RACK_WEAPONS = ["pistol", "rifle", "shotgun"] as const;
 const ZOMBOTS_FEED_KINDS = [
@@ -1366,6 +1367,14 @@ function writeZombotsHud(w: ByteWriter, o: Record<string, unknown>): void {
   const doors = Array.isArray(o.openDoorIds) ? o.openDoorIds as unknown[] : [];
   w.u8(Math.min(255, doors.length));
   for (const id of doors.slice(0, 255)) w.str8(String(id));
+  const doorPaid = Array.isArray(o.doorPaid)
+    ? o.doorPaid as Array<Record<string, unknown>>
+    : [];
+  w.u8(Math.min(255, doorPaid.length));
+  for (const d of doorPaid.slice(0, 255)) {
+    w.str8(String(d.doorId ?? ""));
+    w.u32(u32Of(d.paid));
+  }
   const players = Array.isArray(o.players)
     ? o.players as Array<Record<string, unknown>>
     : [];
@@ -1389,6 +1398,10 @@ function writeZombotsHud(w: ByteWriter, o: Record<string, unknown>): void {
     : [];
   w.u8(Math.min(255, events.length));
   for (const e of events.slice(0, 255)) writeZombotsFeedEvent(w, e);
+  w.u8(clampInt(Number(o.distractorUses ?? 0), 0, 255));
+  const distractorEndsAtTick = u32Of(o.distractorEndsAtTick);
+  w.u32(distractorEndsAtTick);
+  if (distractorEndsAtTick > 0) w.str8(String(o.distractorRackId ?? ""));
 }
 
 function readZombotsHud(r: ByteReader): Record<string, unknown> {
@@ -1402,6 +1415,10 @@ function readZombotsHud(r: ByteReader): Record<string, unknown> {
   const openDoorIds: string[] = [];
   for (let i = 0; i < nd; i++) openDoorIds.push(r.str8());
   out.openDoorIds = openDoorIds;
+  const npd = r.u8();
+  const doorPaid: Array<Record<string, unknown>> = [];
+  for (let i = 0; i < npd; i++) doorPaid.push({ doorId: r.str8(), paid: r.u32() });
+  out.doorPaid = doorPaid;
   const np = r.u8();
   const players: Array<Record<string, unknown>> = [];
   for (let i = 0; i < np; i++) {
@@ -1419,6 +1436,14 @@ function readZombotsHud(r: ByteReader): Record<string, unknown> {
     const events: Array<Record<string, unknown>> = [];
     for (let i = 0; i < ne; i++) events.push(readZombotsFeedEvent(r));
     out.events = events;
+  }
+  const distractorUses = r.u8();
+  if (distractorUses > 0) out.distractorUses = distractorUses;
+  const distractorEndsAtTick = r.u32();
+  if (distractorEndsAtTick > 0) {
+    out.distractorEndsAtTick = distractorEndsAtTick;
+    const rackId = r.str8();
+    if (rackId.length > 0) out.distractorRackId = rackId;
   }
   return out;
 }

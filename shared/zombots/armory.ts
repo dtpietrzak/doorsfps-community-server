@@ -9,7 +9,15 @@
  */
 
 import { distanceSquared2 } from "../math/distance.ts";
-import { WEAPON_ORDER, WEAPON_PISTOL, WEAPON_RIFLE, WEAPON_SHOTGUN } from "../sim/weapons.ts";
+import {
+  getWeapon,
+  shellReloadOf,
+  spareClipsForWeapon,
+  WEAPON_ORDER,
+  WEAPON_PISTOL,
+  WEAPON_RIFLE,
+  WEAPON_SHOTGUN,
+} from "../sim/weapons.ts";
 import type { ZombotsIntent, ZombotsPlayerId, ZombotsRackKind, ZombotsRackWeapon } from "./types.ts";
 import { ZOMBOTS_TUNING } from "./zombotsTuning.ts";
 
@@ -26,12 +34,40 @@ export type ZombotsGunRack = {
   center: { x: number; z: number };
 };
 
-/** Any rack on the map: a gun rack or a power recharge rack. */
+/** Any rack on the map: a gun rack, power recharge rack, or dis-rack-tor. */
 export type ZombotsRack = Omit<ZombotsGunRack, "weapon"> & { weapon: ZombotsRackKind };
 
-/** True for a rack that hangs a gun (the armory's), not the power rack. */
+/** True for a rack that hangs a gun (the armory's), not power/distractor. */
 export function isGunRackEntry(rack: ZombotsRack): rack is ZombotsGunRack {
-  return rack.weapon !== "power";
+  return rack.weapon !== "power" && rack.weapon !== "distractor";
+}
+
+/**
+ * Magazines granted by a gun rack use:
+ * - First take (`!armed`): all magazines (`totalClips`, loaded + spares).
+ * - Refill (`armed`): missing spare magazines (0 when spare mags are full).
+ *   Shell-reloading guns (shotgun) round missing shells up to whole tubes (`magSize`).
+ */
+export function gunRackMags(
+  weaponId: number,
+  armed: boolean,
+  spareClips: number,
+): number {
+  const w = getWeapon(weaponId);
+  if (!armed) return Math.max(0, w.totalClips);
+  const fullSpares = spareClipsForWeapon(weaponId);
+  const missing = Math.max(0, fullSpares - Math.max(0, spareClips));
+  if (missing <= 0) return 0;
+  return shellReloadOf(w) ? Math.ceil(missing / w.magSize) : missing;
+}
+
+/** Zompoints a gun rack use costs (`gunRackMags * ZOMBOTS_TUNING.racks.gunCostPerMag`). */
+export function gunRackCost(
+  weaponId: number,
+  armed: boolean,
+  spareClips: number,
+): number {
+  return gunRackMags(weaponId, armed, spareClips) * ZOMBOTS_TUNING.racks.gunCostPerMag;
 }
 
 export type RackTakeRefusal = "outOfReach" | "downed" | "absent";

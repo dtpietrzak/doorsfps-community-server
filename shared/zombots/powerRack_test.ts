@@ -18,11 +18,11 @@ function input(over: Partial<PowerRechargeInput> = {}): PowerRechargeInput & { s
   };
 }
 
-Deno.test("a power recharge costs 500 zompoints", () => {
-  assertEquals(ZOMBOTS_TUNING.racks.powerCost, 500);
+Deno.test("a power recharge costs 300 zompoints", () => {
+  assertEquals(ZOMBOTS_TUNING.racks.powerCost, 300);
   const i = input();
-  assertEquals(tryPowerRecharge(i), { kind: "ok", cost: 500 });
-  assertEquals(i.spent, [500]);
+  assertEquals(tryPowerRecharge(i), { kind: "ok", cost: 300 });
+  assertEquals(i.spent, [300]);
 });
 
 Deno.test("reach is inclusive and planar", () => {
@@ -52,7 +52,7 @@ Deno.test("a purse that can't cover it is refused after the cost was tried once"
     },
   });
   assertEquals(tryPowerRecharge(broke), { kind: "refused", reason: "notEnough" });
-  assertEquals(broke.spent, [500]);
+  assertEquals(broke.spent, [300]);
 });
 
 Deno.test("non-finite positions are out of reach", () => {
@@ -62,6 +62,6 @@ Deno.test("non-finite positions are out of reach", () => {
   );
 });
 
-Deno.test("a gun rack use costs 100 zompoints", () => {
-  assertEquals(ZOMBOTS_TUNING.racks.gunCost, 100);
+Deno.test("a gun rack use costs 20 zompoints per mag", () => {
+  assertEquals(ZOMBOTS_TUNING.racks.gunCostPerMag, 20);
 });

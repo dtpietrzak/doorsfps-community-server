@@ -316,6 +316,7 @@ export class PersistentBotThinkEngine {
           humanHeatByPole: frame.humanHeatByPole,
           matchOver: frame.matchOver === true,
           zombieWindows: this.zombieWindows,
+          zombieLure: frame.zombieLure ?? null,
         }, slot.state));
       }
       decisions.push({

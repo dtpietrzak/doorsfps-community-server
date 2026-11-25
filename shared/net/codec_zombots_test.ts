@@ -164,6 +164,7 @@ const HUD = {
   zombiesLeft: 19,
   nextWaveAtTick: 0,
   openDoorIds: ["door-1", "door-2"],
+  doorPaid: [{ doorId: "door-3", paid: 3000 }],
   players: [
     { id: "p1", points: 1250, downed: false },
     { id: "p2", points: 0, downed: true },
@@ -188,6 +189,16 @@ Deno.test("ZombotsState carries the whole HUD block", () => {
   const quiet = { ...HUD, phase: "intermission", nextWaveAtTick: 123456 };
   delete (quiet as { events?: unknown }).events;
   assertEquals(roundTrip("zombotsState", quiet), quiet);
+  const withDistractor = {
+    ...HUD,
+    distractorUses: 2,
+    distractorEndsAtTick: 4800,
+    distractorRackId: "rack-d1",
+    events: [
+      { kind: "pointsChanged", playerId: "p1", points: 500, delta: -2500, reason: "distractor" },
+    ],
+  };
+  assertEquals(roundTrip("zombotsState", withDistractor), withDistractor);
 });
 
 Deno.test("Interact has the Shoot wire shape", () => {

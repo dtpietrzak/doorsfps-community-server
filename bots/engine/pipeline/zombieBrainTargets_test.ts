@@ -72,6 +72,7 @@ function view(
   tick: number,
   self: ZombiePlayerView,
   players: readonly ZombiePlayerView[],
+  zombieLure: { x: number; z: number } | null = null,
 ): BotWorldView {
   return {
     tick,
@@ -80,6 +81,7 @@ function view(
     collision: COLLISION,
     map: MAP,
     doorsOpen: true,
+    zombieLure,
   };
 }
 
@@ -132,4 +134,35 @@ Deno.test("target goes down: every zombie retargets the other human, then none s
       assert(Number.isFinite(input.yaw) && Number.isFinite(input.pitch));
     }
   }
+});
+
+Deno.test("active dis-rack-tor lure pulls zombies away from a nearby human", () => {
+  const human = pawn("h1", 0, -3);
+  // Zombie starts right near the human, facing north (-z).
+  const zombie = pawn("z0", 0, 0, { isBot: true, team: "B", yaw: 0 });
+  const brain = new ZombieBrain(ZOMBIE_BOT_CONFIG, { rng: () => 0.5 });
+  const state = emptyBotBrainState();
+  const players = [zombie, human];
+
+  // Without lure: targets the human at -z (yaw ~ 0).
+  const towardHuman = brain.think(view(3, zombie, players, null), state);
+  assertEquals(state.targetEnemyId, "h1");
+  assert(towardHuman?.input != null);
+  assert(Math.abs(towardHuman.input.yaw) < 0.4);
+
+  // With lure behind the zombie at +z: turns around toward +z (|yaw| near PI) and never swings.
+  const lure = { x: 0, z: 12 };
+  let lastAction = brain.think(view(6, zombie, players, lure), state);
+  for (let tick = 9; tick <= 30; tick += 3) {
+    lastAction = brain.think(view(tick, zombie, players, lure), state);
+    assertEquals(lastAction?.melee === true, false);
+    assertEquals(lastAction?.shoot === true, false);
+  }
+  assert(lastAction?.input != null);
+  assert(Math.abs(Math.abs(lastAction.input.yaw) - Math.PI) < 0.4);
+
+  // Once the lure clears, zombie retargets the human.
+  const resumed = brain.think(view(33, zombie, players, null), state);
+  assertEquals(state.targetEnemyId, "h1");
+  assert(resumed?.input != null);
 });

@@ -283,6 +283,11 @@ export type ThinkFrame = Readonly<{
   humanHeatByPole?: Readonly<Record<string, number>>;
   /** Set once the match has ended; brains short-circuit to idle keys. */
   matchOver?: boolean;
+  /**
+   * Zombots dis-rack-tor lure point on the floor. When present, every zombie
+   * heads here instead of chasing humans.
+   */
+  zombieLure?: Vec2;
 }>;
 
 /** Stateful engine contract shared by direct browser and worker transports. */

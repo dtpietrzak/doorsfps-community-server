@@ -5,7 +5,13 @@ import {
   WEAPON_RIFLE,
   WEAPON_SHOTGUN,
 } from "../sim/weapons.ts";
-import { Armory, ZOMBOTS_RACK_WEAPON_ID, type ZombotsGunRack } from "./armory.ts";
+import {
+  Armory,
+  gunRackCost,
+  gunRackMags,
+  ZOMBOTS_RACK_WEAPON_ID,
+  type ZombotsGunRack,
+} from "./armory.ts";
 import { ZOMBOTS_TUNING } from "./zombotsTuning.ts";
 
 const REACH = ZOMBOTS_TUNING.racks.reach;
@@ -175,4 +181,26 @@ Deno.test("racks stay stocked for each player and leave disarms", () => {
   assertEquals(again.kind, "ok");
   if (again.kind === "ok") assertEquals(again.firstTake, true);
   assertEquals(armory.isArmed("b", WEAPON_PISTOL), true);
+});
+
+Deno.test("gun rack cost is 20 per mag for first take and missing spare mags on refill", () => {
+  assertEquals(ZOMBOTS_TUNING.racks.gunCostPerMag, 20);
+  // First take: 3 mags (loaded + 2 spares) = 60 for pistol, rifle, shotgun.
+  for (const weaponId of WEAPON_ORDER) {
+    assertEquals(gunRackMags(weaponId, false, 0), 3);
+    assertEquals(gunRackCost(weaponId, false, 0), 60);
+  }
+  // Mag-reloading gun refills (pistol / rifle: 2 spare mags max).
+  for (const weaponId of [WEAPON_PISTOL, WEAPON_RIFLE]) {
+    assertEquals(gunRackCost(weaponId, true, 2), 0);
+    assertEquals(gunRackCost(weaponId, true, 3), 0); // bonus spare clip
+    assertEquals(gunRackCost(weaponId, true, 1), 20);
+    assertEquals(gunRackCost(weaponId, true, 0), 40);
+  }
+  // Shell-reloading gun refill (shotgun: 10 spare shells, 5 shells per tube).
+  assertEquals(gunRackCost(WEAPON_SHOTGUN, true, 10), 0);
+  assertEquals(gunRackCost(WEAPON_SHOTGUN, true, 9), 20);
+  assertEquals(gunRackCost(WEAPON_SHOTGUN, true, 5), 20);
+  assertEquals(gunRackCost(WEAPON_SHOTGUN, true, 4), 40);
+  assertEquals(gunRackCost(WEAPON_SHOTGUN, true, 0), 40);
 });

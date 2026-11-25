@@ -3055,6 +3055,11 @@ export class PlayerManager {
     return this.players.get(id)?.hasFullSpareClips(weaponId) ?? false;
   }
 
+  /** Current spare clips (or spare shells for shell guns) for one weapon. */
+  public spareClipsFor(id: string, weaponId: number): number {
+    return this.players.get(id)?.spareClipsFor(weaponId) ?? 0;
+  }
+
   /** True when a power recharge rack would restore a spent skill for this player. */
   public canPowerRecharge(id: string): boolean {
     return this.players.get(id)?.canPowerRecharge(this.simTick) ?? false;

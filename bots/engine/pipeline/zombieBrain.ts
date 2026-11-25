@@ -16,6 +16,7 @@ import type { BotBrainConfig } from "../config.ts";
 import type { BrainHooks } from "../hooks.ts";
 import { defaultBrainHooks } from "../hooks.ts";
 import { clamp01 } from "../math/index.ts";
+import { yawToward } from "../navigation/heading.ts";
 import { isSetNumber } from "./state.ts";
 import type {
   BotAction,
@@ -94,20 +95,25 @@ export class ZombieBrain {
 
     runPerceptionStep(ctx, gate.out, draft);
 
+    const lure = view.zombieLure ?? null;
     const players = view.players as readonly ZombiePlayerView[];
-    const target = pickZombieTarget(
-      view.self,
-      players,
-      zombieStickyId(draft),
-    );
-    rememberZombieTarget(draft, target);
+    const target = lure !== null
+      ? null
+      : pickZombieTarget(
+        view.self,
+        players,
+        zombieStickyId(draft),
+      );
+    if (lure === null) rememberZombieTarget(draft, target);
 
-    const last = zombieLastKnown(draft);
-    if (!target && !last) {
+    const last = lure === null ? zombieLastKnown(draft) : null;
+    const goalPoint = lure ?? (target ? { x: target.x, z: target.z } : last);
+    if (!goalPoint) {
       return decorate(
         idleInput(view.self.yaw, 0),
         ctx,
         draft,
+        null,
         null,
         false,
         0,
@@ -115,12 +121,12 @@ export class ZombieBrain {
     }
 
     // Floor nav (zombots): to and over a window, or round walls to the
-    // human. Right at a window the keys come straight from the plan; no
-    // swing, no crowd shove.
+    // human (or active dis-rack-tor lure). Right at a window the keys come
+    // straight from the plan; no swing, no crowd shove.
     const window = zombieWindowPlan(
       view.zombieWindows,
       view.self,
-      target ? { x: target.x, z: target.z } : last,
+      goalPoint,
       draft,
     );
     if (window.kind === "steer") {
@@ -150,13 +156,15 @@ export class ZombieBrain {
     if (ctx.perception) {
       ctx.perception.nearestHuntGoal = window.kind === "walk"
         ? { x: window.goal.x, z: window.goal.z, playerId: target?.id ?? "" }
+        : lure
+        ? { x: lure.x, z: lure.z, playerId: "" }
         : target
         ? { x: target.x, z: target.z, playerId: target.id }
         : null;
     }
     // navMode wipes the hunt-last slot whenever the score doors are open.
     // Put the latched XZ back so a dead target is still walked toward.
-    if (!target && last && window.kind === "none") {
+    if (!lure && !target && last && window.kind === "none") {
       draft.huntLastAgentX = last.x;
       draft.huntLastAgentZ = last.z;
     }
@@ -188,7 +196,9 @@ export class ZombieBrain {
     let desiredYaw = heading.out.rawLook;
     let pitch = 0;
     // On the way to a window, look where it walks, not through the wall.
-    if (target && window.kind === "none") {
+    if (lure && window.kind === "none") {
+      desiredYaw = yawToward(view.self.x, view.self.z, lure.x, lure.z);
+    } else if (target && window.kind === "none") {
       const look = zombieLookAt(view.self, target);
       desiredYaw = look.yaw;
       pitch = look.pitch;
@@ -215,6 +225,7 @@ export class ZombieBrain {
       ctx,
       draft,
       target,
+      lure ?? target,
       peeling,
       pitch,
       window.kind === "walk" ? window.goal : null,
@@ -227,6 +238,7 @@ function decorate(
   ctx: ThinkContext,
   draft: BotBrainState,
   target: ZombiePlayerView | null,
+  holdTarget: { x: number; z: number } | null,
   peeling: boolean,
   pitch: number,
   /** Floor-nav waypoint (window.ts): no swing, no stand-off hold. */
@@ -250,9 +262,9 @@ function decorate(
     if (lunge) armMeleeCooldown(draft, ctx.view.tick);
   }
   const side = zombieSeparationStrafe(ctx.view.self, yaw, ctx.view.players);
-  // The stand-off ring is for the target; a walk goal is just a waypoint.
-  const hold = target !== null && walkGoal === null &&
-    zombieHoldsForward(ctx.view.self, target, ctx.view.players);
+  // The stand-off ring is for the target (or active lure); a walk goal is just a waypoint.
+  const hold = holdTarget !== null && walkGoal === null &&
+    zombieHoldsForward(ctx.view.self, holdTarget, ctx.view.players);
   const steered: PlayerInput = {
     ...input,
     forward: hold ? false : input.forward,

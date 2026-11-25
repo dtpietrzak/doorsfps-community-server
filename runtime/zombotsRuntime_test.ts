@@ -399,9 +399,16 @@ Deno.test("zombots: buying a door debits the purse and opens collision", async (
   const doorId = "door_ei1akqdg";
   // East of the x = 5 wall, looking west at the door (forward = -x).
   stand(h, "p1", 6.5, -5, Math.PI / 2);
+  // A 2000 door is two 1000 charges: the first leaves it shut, part paid.
+  h.runtime.queueInteract("p1", { yaw: Math.PI / 2, pitch: 0 });
+  assertEquals(h.step().facts, []);
+  assertEquals(h.players.getCollision().isSlidingDoorOpen(doorId), false);
+  assertEquals(h.runtime.hud()!.doorPaid, [{ doorId, paid: 1000 }]);
+  assertEquals(h.runtime.hud()!.players[0].points, before - 1000);
   h.runtime.queueInteract("p1", { yaw: Math.PI / 2, pitch: 0 });
   const res = h.step();
   assertEquals(res.facts, [{ op: "doorOpened", doorId, by: "p1" }]);
+  assertEquals(h.runtime.hud()!.doorPaid, []);
   assertEquals(h.players.getCollision().isSlidingDoorOpen(doorId), true);
   const hud = h.runtime.hud()!;
   assertEquals(hud.openDoorIds, [doorId]);

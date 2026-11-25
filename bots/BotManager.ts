@@ -1614,6 +1614,8 @@ export class BotManager {
   /** Zombots: only directed zombies, no fill, pool, churn or agents. */
   private zombotsMode = false;
   private readonly zombieIds = new Set<string>();
+  /** Active dis-rack-tor lure point for zombies, or null when chasing humans. */
+  private zombieLure: { x: number; z: number } | null = null;
 
   /** Raid and zombots rosters hold directed bots only. */
   private get directedOnly(): boolean {
@@ -1700,6 +1702,12 @@ export class BotManager {
    */
   public clearZombies(): void {
     for (const id of [...this.zombieIds]) this.despawnZombie(id);
+    this.zombieLure = null;
+  }
+
+  /** Set or clear the active zombots dis-rack-tor lure point. */
+  public setZombieLure(point: { x: number; z: number } | null): void {
+    this.zombieLure = point ? { x: point.x, z: point.z } : null;
   }
 
   public zombieCount(): number {
@@ -2536,10 +2544,21 @@ export class BotManager {
     // omit it. Zombots always sends the open set, including [] while every
     // door is still shut. A door opened on any map is forwarded too.
     const openIds = collision.openSlidingDoorIds();
-    if (collision.map.mirrorMode !== "zombots" && openIds.length === 0) {
+    const lure = this.zombieLure;
+    if (
+      collision.map.mirrorMode !== "zombots" &&
+      openIds.length === 0 &&
+      lure === null
+    ) {
       return frame;
     }
-    return { ...frame, openSlidingDoorIds: openIds };
+    return {
+      ...frame,
+      ...(collision.map.mirrorMode === "zombots" || openIds.length > 0
+        ? { openSlidingDoorIds: openIds }
+        : {}),
+      ...(lure !== null ? { zombieLure: lure } : {}),
+    };
   }
 
   /** One world + one scheduler shard in, all future actions out. */

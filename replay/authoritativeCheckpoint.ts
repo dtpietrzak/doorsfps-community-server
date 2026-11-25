@@ -93,6 +93,8 @@ export type CheckpointZombotsRunState = {
     readonly presses: number;
   }[];
   readonly armed: readonly { readonly id: string; readonly weapons: readonly number[] }[];
+  /** Charges paid toward doors still shut, map order. */
+  readonly doorPaid?: readonly { readonly doorId: string; readonly paid: number }[];
   /** Zombie bot ids alive at the checkpoint, spawn order. */
   readonly zombies: readonly string[];
 };
