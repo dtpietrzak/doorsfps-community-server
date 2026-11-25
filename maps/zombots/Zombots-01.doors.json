@@ -961,6 +961,35 @@
         "z": -6
       },
       "weapon": "pistol"
+    },
+    {
+      "id": "rack_4t2u4cpz",
+      "wallId": "w_vsqhtlwh",
+      "center": {
+        "x": 8,
+        "z": 0
+      },
+      "weapon": "power"
+    },
+    {
+      "id": "rack_b4jvzdve",
+      "wallId": "w_jeexb1cj",
+      "center": {
+        "x": 5,
+        "z": -9
+      },
+      "weapon": "power",
+      "face": -1
+    },
+    {
+      "id": "rack_cgs74xv4",
+      "wallId": "w_yivpnna3",
+      "center": {
+        "x": -15,
+        "z": 0
+      },
+      "weapon": "power",
+      "face": -1
     }
   ],
   "mirrorMode": "zombots",
