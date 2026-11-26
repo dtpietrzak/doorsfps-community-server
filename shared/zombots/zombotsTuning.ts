@@ -23,21 +23,25 @@ export const ZOMBOTS_TUNING = {
     growthPerWave: 2,
     /** Count multiplier by human count (index = humans - 1). */
     playerCountMultiplier: [1, 1.6, 2.2, 2.8] as const,
-    /** Hard cap on zombies alive at once (tick budget; see step 10). */
-    maxAlive: 24,
+    /**
+     * Hard cap on zombies alive at once. Keeps a 4-human + maxAlive motion
+     * snapshot comfortably under WebTransport's ~1.2 KB datagram ceiling so
+     * 20 Hz volatile poses don't fall back to 5 Hz reliable heartbeats.
+     */
+    maxAlive: 14,
     /** Health / speed / damage step up once every N waves. */
-    stepEveryWaves: 3,
+    stepEveryWaves: 2,
   },
 
   zombie: {
     baseHealth: 70,
-    healthPerStep: 30,
-    // Fraction of player walk speed. Half the first-pass 0.75 / 0.05 / 1.1.
-    baseSpeedScale: 0.4,
-    speedScalePerStep: 0.05,
-    maxSpeedScale: 0.75,
+    healthPerStep: 35,
+    // Fraction of player walk speed. Ramps faster to offset the lower maxAlive.
+    baseSpeedScale: 0.45,
+    speedScalePerStep: 0.08,
+    maxSpeedScale: 0.85,
     baseMeleeDamage: 10,
-    meleeDamagePerStep: 5,
+    meleeDamagePerStep: 6,
     /**
      * Planar center distance at which a bite connects. Two bodies touch
      * near 0.7, so a zombie has to be on the target.

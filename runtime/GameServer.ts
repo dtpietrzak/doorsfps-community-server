@@ -458,6 +458,8 @@ export class GameServer implements ReplayIntegrationSinkHandle {
     }, {
       fill: Object.keys(fill).length > 0 ? fill : undefined,
       difficulty: options.botDifficulty,
+      dynamicArenaBots: !this.isRaidRuntime() && !this.isZombotsRuntime() &&
+        !this.isRanked(),
       brain: options.botBrain,
       poolBrain: options.poolBrain ?? poolBrainCommandFromEnv(),
       thoughtEngine: think.botManagerOptions.thoughtEngine,
@@ -2713,6 +2715,7 @@ export class GameServer implements ReplayIntegrationSinkHandle {
     // Allow the next match to report independently.
     this.lastReportedMatchKey = null;
     this.lastHeatmapReportKey = null;
+    this.bots.resetDynamicArenaDifficulty();
     // New match session — clear heatmap buffers; bot tracking flag is sticky.
     this.heatmaps.resetForNewMatch();
     const winner = this.mapVote.resolveWinner();
@@ -2779,6 +2782,7 @@ export class GameServer implements ReplayIntegrationSinkHandle {
     this.heatmapBatchId = crypto.randomUUID();
     this.lastReportedMatchKey = null;
     this.lastHeatmapReportKey = null;
+    this.bots.resetDynamicArenaDifficulty();
     this.replay.onIdentityRotated(previousRuntimeMatchId, tick);
   }
 

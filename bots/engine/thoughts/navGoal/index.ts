@@ -181,6 +181,7 @@ export function runNavGoalStep(
         tick: ctx.view.tick,
         doorChangeTick: ctx.view.doorChangeTick,
         teammateCamps: ctx.view.teammateCamps,
+        objectiveDirective: ctx.view.objectiveDirective,
       });
 
       writeCache(bag, out);

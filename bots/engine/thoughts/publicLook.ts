@@ -7,7 +7,7 @@
  * combat target changes. This step matches that branch. It does not plan
  * Fitts strokes, overshoot, or aim noise.
  */
-import { max, round, clamp01 } from "../math/index.ts";
+import { abs, clamp, clamp01, max, round } from "../math/index.ts";
 import type { BotBrainState, BotLookSample } from "../types.ts";
 import { viewSimDelta } from "../types.ts";
 import { TICK_HZ } from "../shared/network.ts";
@@ -138,16 +138,45 @@ export function runPublicLookStep(
   draftState.yawHumanizeLastDesired = targetYaw;
   const deltaYaw = yawSignedDelta(chainYaw, targetYaw);
   const deltaPitch = targetPitch - fromPitch;
+  const combatDelayMs = typeof ctx.view.combatDelayMs === "number" &&
+      Number.isFinite(ctx.view.combatDelayMs) && ctx.view.combatDelayMs > 0
+    ? ctx.view.combatDelayMs
+    : 0;
+  // When dynamic arena combat slowdown is active on a built-in ("bot") bot,
+  // cap combat turn rate so aim speed slows down smoothly instead of snapping.
+  const slewCapped = combatLocked && combatDelayMs > 0;
+  const maxTurnRadPerSubstep = slewCapped
+    ? clamp(10 / (1 + combatDelayMs / 300), 2.0, 10.0) / TICK_HZ
+    : Number.POSITIVE_INFINITY;
   const yawSamples: number[] = [];
   const pitchSamples: number[] = [];
+  let curYaw = chainYaw;
+  let curPitch = fromPitch;
   for (let k = 0; k < substeps; k += 1) {
     const last = k + 1 >= substeps;
-    const f = (k + 1) / substeps;
-    yawSamples.push(last ? targetYaw : chainYaw + deltaYaw * f);
-    pitchSamples.push(last ? targetPitch : fromPitch + deltaPitch * f);
+    if (slewCapped) {
+      const remYaw = yawSignedDelta(curYaw, targetYaw);
+      const stepYaw = abs(remYaw) <= maxTurnRadPerSubstep
+        ? remYaw
+        : (remYaw >= 0 ? maxTurnRadPerSubstep : -maxTurnRadPerSubstep);
+      const remPitch = targetPitch - curPitch;
+      const stepPitch = abs(remPitch) <= maxTurnRadPerSubstep
+        ? remPitch
+        : (remPitch >= 0 ? maxTurnRadPerSubstep : -maxTurnRadPerSubstep);
+      curYaw += stepYaw;
+      curPitch += stepPitch;
+      yawSamples.push(curYaw);
+      pitchSamples.push(curPitch);
+    } else {
+      const f = (k + 1) / substeps;
+      curYaw = last ? targetYaw : chainYaw + deltaYaw * f;
+      curPitch = last ? targetPitch : fromPitch + deltaPitch * f;
+      yawSamples.push(curYaw);
+      pitchSamples.push(curPitch);
+    }
   }
-  draftState.yawHumanizeServoYaw = targetYaw;
-  draftState.lookPlanPitch = targetPitch;
+  draftState.yawHumanizeServoYaw = curYaw;
+  draftState.lookPlanPitch = curPitch;
   draftState.yawHumanizeNoiseOut = 0;
   return packLook(prior, input, yawSamples, pitchSamples);
 }

@@ -1,5 +1,6 @@
 import type {
   BotDefinition,
+  BotObjectiveDirective,
   BotRole,
   BotInputIntent,
   BotLookSample,
@@ -746,6 +747,9 @@ function writePlayer(writer: Writer, player: PlayerSnapshot): void {
   if (player.moveYaw === null) flags2 |= 2;
   if (player.matchPlayer === true) flags2 |= 4;
   if (player.unlimitedAmmo === true) flags2 |= 8;
+  if (player.objectiveDirective === "capture") flags2 |= 1 << 4;
+  else if (player.objectiveDirective === "defend") flags2 |= 2 << 4;
+  else if (player.objectiveDirective === "slay") flags2 |= 3 << 4;
   writer.u8(flags2);
   writer.f64(player.health);
   writer.i32(player.score);
@@ -817,6 +821,15 @@ function readPlayer(reader: Reader): PlayerSnapshot {
   for (let index = 0; index < skillCount; index += 1) {
     skills.push(readSkill(reader));
   }
+  const directiveTag = (flags2 >> 4) & 3;
+  const objectiveDirective: BotObjectiveDirective | undefined =
+    directiveTag === 1
+      ? "capture"
+      : directiveTag === 2
+      ? "defend"
+      : directiveTag === 3
+      ? "slay"
+      : undefined;
   return {
     id,
     kind: kind === 0 ? "human" : kind === 1 ? "bot" : "agent",
@@ -841,6 +854,7 @@ function readPlayer(reader: Reader): PlayerSnapshot {
     ...((flags & 64) === 0 ? {} : { unlimitedAmmo: (flags2 & 8) !== 0 }),
     ...(weapons === undefined ? {} : { weapons }),
     ...(glitchState === undefined ? {} : { glitchState }),
+    ...(objectiveDirective === undefined ? {} : { objectiveDirective }),
     weapon,
     skills,
   };
@@ -850,10 +864,12 @@ function readPlayer(reader: Reader): PlayerSnapshot {
  * Bits on the doors byte. Old frames store 0 or 1 there and end at matchOver,
  * so they still decode with the trailing fields absent. An empty open-doors
  * list sets bit 1 and writes a zero count, which is not the same as leaving
- * it off. Bit 2 appends a zombots dis-rack-tor lure point.
+ * it off. Bit 2 appends a zombots dis-rack-tor lure point. Bit 3 appends
+ * per-team combatDelayMsA and combatDelayMsB.
  */
 const FRAME_OPEN_SLIDING_DOORS = 2;
 const FRAME_ZOMBIE_LURE = 4;
+const FRAME_COMBAT_DELAY = 8;
 
 function writeFrame(writer: Writer, frame: ThinkFrame): void {
   writer.u32(frame.tick);
@@ -861,9 +877,12 @@ function writeFrame(writer: Writer, frame: ThinkFrame): void {
   writer.string(frame.mapRevision);
   const openIds = frame.openSlidingDoorIds;
   const lure = frame.zombieLure;
+  const hasCombatDelay = frame.combatDelayMsA !== undefined ||
+    frame.combatDelayMsB !== undefined;
   let doorByte = frame.doorsOpen ? 1 : 0;
   if (openIds !== undefined) doorByte |= FRAME_OPEN_SLIDING_DOORS;
   if (lure !== undefined) doorByte |= FRAME_ZOMBIE_LURE;
+  if (hasCombatDelay) doorByte |= FRAME_COMBAT_DELAY;
   writer.u8(doorByte);
   writer.i32(frame.doorChangeTick ?? NULL_I32);
   writer.i32(frame.teamScoreA);
@@ -882,6 +901,10 @@ function writeFrame(writer: Writer, frame: ThinkFrame): void {
   }
   if (lure !== undefined) {
     writePoint(writer, lure);
+  }
+  if (hasCombatDelay) {
+    writer.f64(frame.combatDelayMsA ?? 0);
+    writer.f64(frame.combatDelayMsB ?? 0);
   }
 }
 
@@ -911,6 +934,12 @@ function readFrame(reader: Reader): ThinkFrame {
   const zombieLure = (doorByte & FRAME_ZOMBIE_LURE) !== 0
     ? readPoint(reader)
     : undefined;
+  let combatDelayMsA: number | undefined;
+  let combatDelayMsB: number | undefined;
+  if ((doorByte & FRAME_COMBAT_DELAY) !== 0) {
+    combatDelayMsA = reader.f64();
+    combatDelayMsB = reader.f64();
+  }
   return {
     tick,
     simDelta,
@@ -921,6 +950,8 @@ function readFrame(reader: Reader): ThinkFrame {
     teamScoreB,
     players,
     ...(openSlidingDoorIds !== undefined ? { openSlidingDoorIds } : {}),
+    ...(combatDelayMsA !== undefined ? { combatDelayMsA } : {}),
+    ...(combatDelayMsB !== undefined ? { combatDelayMsB } : {}),
     ...(matchOver ? { matchOver: true } : {}),
     ...(zombieLure !== undefined ? { zombieLure } : {}),
   };

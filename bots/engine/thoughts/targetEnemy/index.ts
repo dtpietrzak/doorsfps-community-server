@@ -157,14 +157,23 @@ export function runTargetEnemyStep(
       const mobilityBlocksStill = duckBlocksStill || vaultBlocksStill;
       // V1 door camp + grey agents: stand-ground plant (no combat ADAD).
       // Vault / float-duck must keep body keys even for greys.
+      const directive = ctx.view.objectiveDirective;
+      const directiveFightBias = !me.isAgent &&
+        (directive === "defend" || directive === "slay");
+      const baseDoorAgg = directiveFightBias
+        ? Math.min(doorAggression, 0.2)
+        : doorAggression;
+      const baseStandGround = mobilityBlocksStill
+        ? 0
+        : campPlanted || me.isAgent
+        ? 1
+        : directiveFightBias
+        ? Math.max(targetEnemyStandGroundChance, 0.65)
+        : targetEnemyStandGroundChance;
       const biased = ctx.hooks.combatBias(me, ctx.view, {
-        doorAggression,
-        standGroundChance: mobilityBlocksStill
-          ? 0
-          : campPlanted || me.isAgent
-          ? 1
-          : targetEnemyStandGroundChance,
-        ignoreDoorPriority: huntActive,
+        doorAggression: baseDoorAgg,
+        standGroundChance: baseStandGround,
+        ignoreDoorPriority: huntActive || directiveFightBias,
         doorPriorityRatio: 1,
       }, { campPlanted, huntActive });
       const effectiveStandGround = biased.standGroundChance;

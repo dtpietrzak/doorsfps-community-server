@@ -1,5 +1,6 @@
 import type {
   BotMapDefinition,
+  BotObjectiveDirective,
   PlayerSnapshot,
   SkillSnapshot,
   ThinkFrame,
@@ -64,6 +65,7 @@ function snapshotPlayer(
   player: Player,
   tick: number,
   collision: MapCollision,
+  objectiveDirective?: BotObjectiveDirective,
 ): PlayerSnapshot {
   const weapons = WEAPON_ORDER.map((id) => ({
     id,
@@ -96,6 +98,7 @@ function snapshotPlayer(
     glitchState: player.glitchSnapState(tick, collision) ?? "inactive",
     // Zombots only; other modes keep the frame unchanged.
     ...(player.downed ? { isDowned: true } : {}),
+    ...(objectiveDirective !== undefined ? { objectiveDirective } : {}),
     weapon: {
       id: player.weaponId,
       ammoInMagazine: player.ammoInMag,
@@ -237,13 +240,25 @@ export function buildThinkFrame(
     doorChangeTick: number | null;
     teamScoreA: number;
     teamScoreB: number;
+    combatDelayMsA?: number;
+    combatDelayMsB?: number;
+    objectiveDirectiveFor?: (playerId: string) => BotObjectiveDirective | undefined;
     matchOver?: boolean;
   }>,
 ): ThinkFrame {
   const players: PlayerSnapshot[] = [];
   for (const player of input.players) {
-    players.push(snapshotPlayer(player, input.tick, input.collision));
+    players.push(
+      snapshotPlayer(
+        player,
+        input.tick,
+        input.collision,
+        input.objectiveDirectiveFor?.(player.id),
+      ),
+    );
   }
+  const hasCombatDelay = (input.combatDelayMsA ?? 0) > 0 ||
+    (input.combatDelayMsB ?? 0) > 0;
   return {
     tick: input.tick,
     simDelta: input.simDelta,
@@ -252,6 +267,12 @@ export function buildThinkFrame(
     doorChangeTick: input.doorChangeTick,
     teamScoreA: input.teamScoreA,
     teamScoreB: input.teamScoreB,
+    ...(hasCombatDelay
+      ? {
+        combatDelayMsA: input.combatDelayMsA ?? 0,
+        combatDelayMsB: input.combatDelayMsB ?? 0,
+      }
+      : {}),
     players,
     // Presence-implies-true, matching the wire codec (which omits the key
     // on the false/absent side of the round trip — see protocol/pipeline.ts).

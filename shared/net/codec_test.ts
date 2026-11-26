@@ -2,6 +2,7 @@ import { assert, assertEquals, assertLess } from "jsr:@std/assert@1";
 import { socketIoBinaryEventBytes, socketIoJsonEventBytes } from "./bytes.ts";
 import { decodeGamePacket, encodeGamePacket } from "./codec.ts";
 import { GAME_PROTO, isEmptyGameEvent, isGameEvent } from "./opcodes.ts";
+import { ZOMBOTS_TUNING } from "../zombots/zombotsTuning.ts";
 
 function roundtrip(event: string, payload?: unknown): unknown {
   const buf = encodeGamePacket(event, payload);
@@ -172,6 +173,38 @@ Deno.test("16-player motion snapshot stays under 3KB on the wire", () => {
   const json = socketIoJsonEventBytes("snapshot", snap);
   assertLess(wire, 3000);
   assertLess(wire, json * 0.45);
+});
+
+Deno.test("peak zombots motion snapshot (4 humans + maxAlive zombies) fits WebTransport datagram", () => {
+  const humans = Array.from(
+    { length: ZOMBOTS_TUNING.players.max },
+    (_, i) => ({ ...motionPlayer(`wt_hum${i}abcd`, i), team: "A" as const, armedMask: 3 }),
+  );
+  const zombies = Array.from(
+    { length: ZOMBOTS_TUNING.waves.maxAlive },
+    (_, i) => ({
+      ...motionPlayer(`bot:zombie-${100 + i}`, i),
+      team: "B" as const,
+      lastProcessedInputSeq: undefined,
+      inputHoldTicks: undefined,
+      botDec: 7,
+      armedMask: 0,
+    }),
+  );
+  const snap = {
+    tick: 12000,
+    doorsOpen: false,
+    doorChangeTick: 0,
+    matchEndTick: 0,
+    scores: { A: 0, B: 0 },
+    phase: "live",
+    transport: { emitSeq: 500, emitAtMs: 1_700_000_000_000, kind: "volatile" },
+    players: [...humans, ...zombies],
+    projectiles: [],
+  };
+  const buf = encodeGamePacket("snapshot", snap)!;
+  // Typical QUIC/WebTransport maxDatagramSize is ~1150–1200 bytes.
+  assertLess(buf.byteLength, 1100);
 });
 
 Deno.test("CombatBurst / Shoot / Ping roundtrip and beat JSON", () => {

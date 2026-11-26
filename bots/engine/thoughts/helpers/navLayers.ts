@@ -6,6 +6,7 @@
  * and the post-target look motor so behavior is not crammed into yawIntent.
  */
 
+import type { BotObjectiveDirective } from "../../model/index.ts";
 import type { DoorsMap } from "../../shared/map.ts";
 import type { TeamId } from "../../shared/network.ts";
 import { TICK_HZ } from "../../shared/network.ts";
@@ -25,6 +26,7 @@ import {
   botLateralBias,
   CAMP_MAX_DOOR_DIST,
   enemyDoorTarget,
+  ownDoorTarget,
   pickCoverDoorCamp,
 } from "../../helpers/nav.ts";
 import {
@@ -244,22 +246,34 @@ export type StepNavModeArgs = {
    * Omit → no force-hunt check.
    */
   tick?: number;
+  /** Optional arena dynamic objective role (`capture` | `defend` | `slay`). */
+  objectiveDirective?: BotObjectiveDirective;
 };
 
 /**
- * Latch path | hunt | doorCamp from doors + personality.
+ * Latch path | hunt | doorCamp from doors + personality + optional arena directive.
  * Mutates bag hunt/camp flags and sticky on mode edges.
  * Team hunters roll initial doorDist bias with `rng`.
  */
 export function stepNavMode(args: StepNavModeArgs): NavModeDecision {
-  const { doorsOpen, isGreyAgent, agentAggression, bag, rng, tick } = args;
+  const {
+    doorsOpen,
+    isGreyAgent,
+    agentAggression,
+    bag,
+    rng,
+    tick,
+    objectiveDirective,
+  } = args;
   const prevDoorsOpen = bag.huntDoorsOpen;
   // Dwell-break after long camp plant: temporarily hunt instead of re-plant.
   const forceHunt = typeof tick === "number" &&
     isDwellForceHuntActive(bag, tick);
+  const defendOwnDoor = !isGreyAgent && objectiveDirective === "defend";
+  const roamSlay = !isGreyAgent && objectiveDirective === "slay";
   const preferCamp = !isGreyAgent && !forceHunt &&
-    wantsEnemyDoorCamp(agentAggression);
-  const canClosedMode = !doorsOpen;
+    (defendOwnDoor || (!roamSlay && wantsEnemyDoorCamp(agentAggression)));
+  const canClosedMode = !doorsOpen || defendOwnDoor || roamSlay;
 
   let huntActive = Boolean(bag.huntActive) && canClosedMode && !preferCamp;
   let doorCampActive = Boolean(bag.doorCampActive) && canClosedMode &&
@@ -294,7 +308,7 @@ export function stepNavMode(args: StepNavModeArgs): NavModeDecision {
   if (bag.huntDoorsSampled) {
     if (prevDoorsOpen && !doorsOpen) {
       enterClosedMode();
-    } else if (!prevDoorsOpen && doorsOpen) {
+    } else if (!prevDoorsOpen && doorsOpen && !defendOwnDoor && !roamSlay) {
       huntActive = false;
       doorCampActive = false;
       huntDoorBias = "own";
@@ -303,8 +317,8 @@ export function stepNavMode(args: StepNavModeArgs): NavModeDecision {
       forceNoiseReroll = true;
       clearStickyYawPole(bag);
     }
-  } else if (!doorsOpen) {
-    // First think already closed — enter without waiting for edge.
+  } else if (canClosedMode) {
+    // First think already closed or directive-driven — enter without waiting for edge.
     if (preferCamp) {
       doorCampActive = true;
       huntActive = false;
@@ -323,6 +337,13 @@ export function stepNavMode(args: StepNavModeArgs): NavModeDecision {
     if (forceNoiseReroll) clearStickyYawPole(bag);
   }
 
+  // Directive transitions while doors are open (e.g. score changed mid-phase).
+  if (defendOwnDoor && !forceHunt && !doorCampActive) {
+    enterClosedMode();
+  } else if (roamSlay && !huntActive) {
+    enterClosedMode();
+  }
+
   // Camp dwell-break: leave plant and hunt until force-hunt window ends.
   if (forceHunt && canClosedMode) {
     doorCampActive = false;
@@ -333,7 +354,7 @@ export function stepNavMode(args: StepNavModeArgs): NavModeDecision {
     clearDoorCampState(bag);
   }
 
-  if (doorsOpen) {
+  if (doorsOpen && !defendOwnDoor && !roamSlay) {
     huntActive = false;
     doorCampActive = false;
   }
@@ -393,7 +414,32 @@ export type StepNavGoalArgs = {
   doorChangeTick?: number;
   /** Extra teammate hold claims (from BotManager harvest). */
   teammateCamps?: readonly { x: number; z: number }[];
+  /** Optional arena dynamic objective role (`capture` | `defend` | `slay`). */
+  objectiveDirective?: BotObjectiveDirective;
 };
+
+function nearestEnemyPlayerGoal(
+  selfX: number,
+  selfZ: number,
+  players: BotWorldView["players"],
+  selfId: string,
+  team: TeamId,
+): YawPolePoint | null {
+  let best: YawPolePoint | null = null;
+  let bestD2 = Infinity;
+  for (const p of players) {
+    if (!p.alive || p.id === selfId) continue;
+    if (!p.isAgent && p.team === team) continue;
+    const dx = p.x - selfX;
+    const dz = p.z - selfZ;
+    const d2 = dx * dx + dz * dz;
+    if (d2 < bestD2) {
+      bestD2 = d2;
+      best = { x: p.x, z: p.z };
+    }
+  }
+  return best;
+}
 
 /**
  * Always-defined world goal for this think.
@@ -419,11 +465,35 @@ export function stepNavGoal(args: StepNavGoalArgs): NavGoalDecision {
     tick,
     doorChangeTick,
     teammateCamps,
+    objectiveDirective,
   } = args;
   const enemyDoor = enemyDoorOpt ?? enemyDoorTarget(map, team);
+  const defendOwn = !isGreyAgent && objectiveDirective === "defend";
+  const roamSlay = !isGreyAgent && objectiveDirective === "slay";
 
   if (mode === "doorCamp") {
-    const wantLip = wantsLipDoorCamp(doorAggression, tick, doorChangeTick);
+    const ownDoor = ownDoorTarget(map, team);
+    const campAnchor = defendOwn ? ownDoor : enemyDoor;
+    const oppositeAnchor = defendOwn ? enemyDoor : ownDoor;
+    // If directive flipped between defending own door and camping enemy door,
+    // drop a stale plant that sits closer to the opposite door.
+    if (hasDoorCampPlant(bag)) {
+      const dTarget = distance2(
+        bag.doorCampPlantX - campAnchor.x,
+        bag.doorCampPlantZ - campAnchor.z,
+      );
+      const dOpposite = distance2(
+        bag.doorCampPlantX - oppositeAnchor.x,
+        bag.doorCampPlantZ - oppositeAnchor.z,
+      );
+      if (dOpposite < dTarget) {
+        bag.doorCampPlantX = UNSET;
+        bag.doorCampPlantZ = UNSET;
+      }
+    }
+    const wantLip = defendOwn
+      ? false
+      : wantsLipDoorCamp(doorAggression, tick, doorChangeTick);
     if (bag.doorCampWantLip !== wantLip) {
       bag.doorCampWantLip = wantLip;
       bag.doorCampPlantX = UNSET;
@@ -432,7 +502,7 @@ export function stepNavGoal(args: StepNavGoalArgs): NavGoalDecision {
     if (!hasDoorCampPlant(bag) && collision) {
       const claims = collectEnemyDoorCampClaims(
         map,
-        team,
+        defendOwn ? (team === "A" ? "B" : "A") : team,
         players,
         selfId,
         CAMP_MAX_DOOR_DIST,
@@ -447,11 +517,11 @@ export function stepNavGoal(args: StepNavGoalArgs): NavGoalDecision {
           avoid: claims,
           rng,
         })
-        : pickCoverDoorCamp(collision, enemyDoor, {
+        : pickCoverDoorCamp(collision, campAnchor, {
           avoid: claims,
           rng,
           lateralBias: botLateralBias(selfId),
-          preferTight: (doorAggression ?? 0) >= 0.5,
+          preferTight: !defendOwn && (doorAggression ?? 0) >= 0.5,
         });
       bag.doorCampPlantX = plant.x;
       bag.doorCampPlantZ = plant.z;
@@ -469,10 +539,10 @@ export function stepNavGoal(args: StepNavGoalArgs): NavGoalDecision {
         forceNoiseReroll,
       };
     }
-    // No collision / plant: fall back to enemy door mid as goal.
+    // No collision / plant: fall back to anchor door mid as goal.
     return {
       mode,
-      goal: enemyDoor,
+      goal: campAnchor,
       doorDistPoint: null,
       campArrived: false,
       forceNoiseReroll,
@@ -499,6 +569,9 @@ export function stepNavGoal(args: StepNavGoalArgs): NavGoalDecision {
       : UNSET;
     bag.huntActive = true;
 
+    const slayLiveGoal = roamSlay
+      ? nearestEnemyPlayerGoal(selfX, selfZ, players, selfId, team)
+      : undefined;
     const resolved = resolveHuntGoalPoint(
       selfX,
       selfZ,
@@ -508,7 +581,9 @@ export function stepNavGoal(args: StepNavGoalArgs): NavGoalDecision {
       { x: bag.huntLastAgentX, z: bag.huntLastAgentZ },
       {
         isGreyAgent,
-        liveGoal: nearestHuntOpt === undefined
+        liveGoal: roamSlay
+          ? slayLiveGoal
+          : nearestHuntOpt === undefined
           ? undefined
           : nearestHuntOpt
           ? { x: nearestHuntOpt.x, z: nearestHuntOpt.z }

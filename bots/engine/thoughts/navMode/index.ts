@@ -58,6 +58,7 @@ export function shouldForceNavMode(
   bag: HuntBrainState,
   doorsOpen: boolean,
   tick?: number,
+  objectiveDirective?: import("../../model/index.ts").BotObjectiveDirective,
 ): boolean {
   if (!bag.huntDoorsSampled) return true;
   if (bag.huntDoorsOpen !== doorsOpen) return true;
@@ -65,6 +66,14 @@ export function shouldForceNavMode(
     typeof tick === "number" &&
     isDwellForceHuntActive(bag, tick) &&
     bag.doorCampActive
+  ) {
+    return true;
+  }
+  if (objectiveDirective === "defend" && !bag.doorCampActive) return true;
+  if (objectiveDirective === "slay" && !bag.huntActive) return true;
+  if (
+    objectiveDirective === "capture" && doorsOpen &&
+    (bag.doorCampActive || bag.huntActive)
   ) {
     return true;
   }
@@ -82,7 +91,8 @@ export function runNavModeStep(
       const bag = draftState;
       const doorsOpen = Boolean(ctx.view.doorsOpen);
       const tick = ctx.view.tick;
-      const force = shouldForceNavMode(bag, doorsOpen, tick);
+      const objectiveDirective = ctx.view.objectiveDirective;
+      const force = shouldForceNavMode(bag, doorsOpen, tick, objectiveDirective);
       if (
         !shouldRunCadencedStep("navMode", tick, me.id, { force })
       ) {
@@ -95,6 +105,7 @@ export function runNavModeStep(
         bag,
         rng,
         tick,
+        objectiveDirective,
       });
       return { out };
 }

@@ -300,6 +300,17 @@ export class PersistentBotThinkEngine {
         validMap && map !== null && collision !== null && slot !== null &&
         self !== null && self.spawnedAtTick === requested.spawnedAtTick
       ) {
+        const combatDelayMs = self.team === "A"
+          ? frame.combatDelayMsA
+          : frame.combatDelayMsB;
+        let objectiveDirective = undefined;
+        for (let p = 0; p < frame.players.length; p++) {
+          const snap = frame.players[p]!;
+          if (snap.id === self.id) {
+            objectiveDirective = snap.objectiveDirective;
+            break;
+          }
+        }
         action = wireAction(slot.brain.think({
           tick: frame.tick,
           simDelta: frame.simDelta,
@@ -317,6 +328,8 @@ export class PersistentBotThinkEngine {
           matchOver: frame.matchOver === true,
           zombieWindows: this.zombieWindows,
           zombieLure: frame.zombieLure ?? null,
+          combatDelayMs,
+          objectiveDirective,
         }, slot.state));
       }
       decisions.push({

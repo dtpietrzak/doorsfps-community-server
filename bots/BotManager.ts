@@ -68,6 +68,7 @@ import {
   ZOMBIE_BOT_CONFIG,
 } from "./botBrainConfig.ts";
 import { DEFAULT_BOT_DIFFICULTY } from "./difficulty.ts";
+import { DynamicArenaDirector } from "./dynamicArenaDifficulty.ts";
 import { botThinksOnSimPhase } from "./helpers/combat.ts";
 import { agentDoorSpawn } from "./helpers/nav.ts";
 import { botLifeRandomSeed } from "./shadow/types.ts";
@@ -586,6 +587,8 @@ export class BotManager {
   private readonly agents = new Map<string, ManagedBot>();
   private fill: BotFillPolicy;
   private difficulty: BotDifficulty;
+  /** Per-match dynamic arena difficulty + door-objective allocator (null outside arena). */
+  private readonly dynamicArena: DynamicArenaDirector | null;
   /** Churn band and delays. Null keeps the roster on the exact autofill target. */
   private churnPolicy: ChurnPolicy | null = null;
   /** Map-vote share for pool pawns. Null casts no votes. */
@@ -746,6 +749,11 @@ export class BotManager {
        * pawns on the builtin slot with the community config.
        */
       poolBrain?: "builtin" | readonly string[];
+      /**
+       * Enable per-match dynamic arena bot difficulty and door-objective
+       * allocation (arena modes only; disabled for raid/zombots/ranked).
+       */
+      dynamicArenaBots?: boolean;
     } = {},
   ) {
     this.players = players;
@@ -756,6 +764,9 @@ export class BotManager {
         DEFAULT_BOT_FILL.noBotsOnEmptyServer,
     };
     this.difficulty = options.difficulty ?? DEFAULT_BOT_DIFFICULTY;
+    this.dynamicArena = options.dynamicArenaBots === true
+      ? new DynamicArenaDirector(this.difficulty)
+      : null;
     this.autoFillEnabled = options.autoFill !== false;
     this.nowMs = options.nowMs ?? (() => Date.now());
     this.rand = options.rand ?? Math.random;
@@ -1025,6 +1036,12 @@ export class BotManager {
    */
   public setDifficulty(difficulty: BotDifficulty): void {
     this.difficulty = difficulty;
+    this.dynamicArena?.setDifficulty(difficulty);
+  }
+
+  /** Reset per-match dynamic arena difficulty and door directives back to baseline. */
+  public resetDynamicArenaDifficulty(): void {
+    this.dynamicArena?.reset();
   }
 
   public setMinPlayers(n: number): void {
@@ -2529,16 +2546,32 @@ export class BotManager {
   ): ThinkBatchInput["frame"] {
     const doorCycle = this.players.getDoorCycleState(simTick);
     const teamScores = this.players.getScores();
+    const players = this.players.allCached();
+    const matchOver = this.players.isMatchOver();
+    let combatDelayMsA: number | undefined;
+    let combatDelayMsB: number | undefined;
+    let objectiveDirectiveFor:
+      | ((playerId: string) => import("./dynamicArenaDifficulty.ts").BotObjectiveDirective | undefined)
+      | undefined;
+    if (this.dynamicArena !== null) {
+      this.dynamicArena.onTick(players, teamScores, matchOver);
+      combatDelayMsA = this.dynamicArena.getCombatDelayMs("A");
+      combatDelayMsB = this.dynamicArena.getCombatDelayMs("B");
+      objectiveDirectiveFor = (id) => this.dynamicArena!.getDirective(id);
+    }
     const frame = buildThinkFrame({
       tick: simTick,
       simDelta: SIM_TICKS_PER_BOT_TICK,
       collision,
-      players: this.players.allCached(),
+      players,
       doorsOpen: doorCycle.doorsOpen,
       doorChangeTick: doorCycle.doorChangeTick,
       teamScoreA: teamScores.A,
       teamScoreB: teamScores.B,
-      matchOver: this.players.isMatchOver(),
+      combatDelayMsA,
+      combatDelayMsB,
+      objectiveDirectiveFor,
+      matchOver,
     });
     // A missing list means every sliding door is still a nav gap. Arenas
     // omit it. Zombots always sends the open set, including [] while every

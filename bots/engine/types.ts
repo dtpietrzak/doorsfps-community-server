@@ -1,3 +1,4 @@
+import type { BotObjectiveDirective } from "./model/index.ts";
 import type { Player } from "./players/Player.ts";
 import type { PlayerInput } from "./shared/network.ts";
 import type { MapCollision } from "./world/MapCollision.ts";
@@ -66,6 +67,10 @@ export type BotWorldView = {
   zombieWindows?: ZombieWindowNav | null;
   /** Active dis-rack-tor lure point: zombies head here instead of humans. */
   zombieLure?: { x: number; z: number } | null;
+  /** Per-team dynamic arena combat slowdown (ms) for this bot's team. */
+  combatDelayMs?: number;
+  /** Per-bot dynamic arena objective role (`capture` | `defend` | `slay`). */
+  objectiveDirective?: BotObjectiveDirective;
 };
 
 /** One sim tick of look inside a bot period (see {@link BotAction.lookSamples}). */

@@ -626,11 +626,35 @@ export class BotBrain {
       draft,
       this.rng,
     );
+    const combatDelayMs = max(0, finiteOrZero(view.combatDelayMs ?? 0));
+    const effectiveLookReactionBaseMs = this.lookReactionBaseMs +
+      combatDelayMs * 0.5;
+    let effectiveLookAim = this.lookAim;
+    let effectivePursuitLagSec = this.pursuitLagSec;
+    if (
+      combatDelayMs > 0 &&
+      (this.lookAim.fittsASec > 0 || this.lookAim.fittsBSec > 0)
+    ) {
+      const aimSlowScale = clamp(1 + combatDelayMs / 550, 1, 2.6);
+      effectiveLookAim = {
+        fittsASec: this.lookAim.fittsASec * aimSlowScale,
+        fittsBSec: this.lookAim.fittsBSec * aimSlowScale,
+        pathWidthDeg: this.lookAim.pathWidthDeg,
+        primaryGainMean: this.lookAim.primaryGainMean,
+        primaryGainSpread: this.lookAim.primaryGainSpread,
+        correctionDelayMs: this.lookAim.correctionDelayMs * aimSlowScale,
+        maxCorrections: this.lookAim.maxCorrections,
+        curvature: this.lookAim.curvature,
+        pursuitLagMs: this.lookAim.pursuitLagMs * aimSlowScale,
+        combatWidthRad: this.lookAim.combatWidthRad,
+      };
+      effectivePursuitLagSec = effectiveLookAim.pursuitLagMs * 0.001;
+    }
     const yawHumanize = ctx.hooks.look(
       ctx,
       stuckWTurn.out,
       draft,
-      this.lookReactionBaseMs,
+      effectiveLookReactionBaseMs,
       this.lookReactionVarianceMs,
       this.rng,
       this.yawLookTauSec,
@@ -638,21 +662,21 @@ export class BotBrain {
       this.yawOvershootMaxFrac,
       this.yawMicroNoiseAmp,
       this.yawTrackErrorAmp,
-      this.lookAim,
+      effectiveLookAim,
     );
     const click = runClickStep(
       ctx,
       yawHumanize.out,
       draft,
       this.shootAimHalfAngleRad,
-      this.reactionBaseMs,
+      this.reactionBaseMs + combatDelayMs,
       this.reactionVarianceMs,
-      this.shotIntervalMs,
+      this.shotIntervalMs + combatDelayMs * 0.5,
       this.clickCadenceMs,
-      this.clickSettleMs,
+      this.clickSettleMs + combatDelayMs * 0.25,
       this.hitChance,
       this.leadSec,
-      this.pursuitLagSec,
+      effectivePursuitLagSec,
       this.rng,
     );
     const useSkills = runUseSkillsStep(

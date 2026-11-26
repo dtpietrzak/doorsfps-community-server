@@ -33,10 +33,15 @@ export function runDoorCampLookStep(
 ): StepResult<HeadingDecision> {
       const me = ctx.view.self;
       const bag = draftState as HuntBrainState;
+      // When defending own door, mirror the look geometry so the defender's
+      // back stays to their own door while sweeping incoming lanes.
+      const lookTeam = !me.isAgent && ctx.view.objectiveDirective === "defend"
+        ? (me.team === "A" ? "B" : "A")
+        : me.team;
       const out = stepDoorCampLook({
         prior,
         selfYaw: me.yaw,
-        team: me.team,
+        team: lookTeam,
         map: ctx.view.map,
         tick: ctx.view.tick,
         campingAnxiety,

@@ -1,5 +1,7 @@
 export type TeamId = "A" | "B";
 export type PlayerKind = "human" | "bot" | "agent";
+/** Per-bot dynamic Arena objective role assigned by the host. */
+export type BotObjectiveDirective = "capture" | "defend" | "slay";
 export type WallKind = "full" | "half" | "float";
 export type EdgeId = "south" | "east" | "north" | "west";
 
@@ -163,6 +165,11 @@ export type PlayerSnapshot = Readonly<{
    * means standing, and in every other mode.
    */
   isDowned?: boolean;
+  /**
+   * Arena dynamic objective role for this bot (`capture` / `defend` / `slay`).
+   * Omitted outside dynamic arena matches (default bot behavior).
+   */
+  objectiveDirective?: BotObjectiveDirective;
   weapon: WeaponSnapshot;
   skills: readonly SkillSnapshot[];
 }>;
@@ -275,6 +282,12 @@ export type ThinkFrame = Readonly<{
   openSlidingDoorIds?: readonly string[];
   teamScoreA: number;
   teamScoreB: number;
+  /**
+   * Per-team dynamic arena combat slowdown (ms). Omitted / 0 = normal tier
+   * baseline. Positive values add reaction / shot / aim-speed delay.
+   */
+  combatDelayMsA?: number;
+  combatDelayMsB?: number;
   players: readonly PlayerSnapshot[];
   /**
    * In-process only, never on the wire: a residual route prior a private

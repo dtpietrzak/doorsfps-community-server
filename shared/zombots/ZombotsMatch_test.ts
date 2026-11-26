@@ -93,11 +93,11 @@ Deno.test("zombotsWavePlan scales with humans and steps on the stock table", () 
   assertEquals(zombotsWavePlan(1, 4).count, 17);
 
   assertEquals(zombotsWavePlan(2, 1).count, 8);
-  assertEquals(zombotsWavePlan(3, 1).count, 10);
-  assertEquals(zombotsWavePlan(3, 1).step, 0);
+  assertEquals(zombotsWavePlan(2, 1).step, 0);
 
-  const stepped = zombotsWavePlan(4, 1);
-  assertEquals(stepped.count, 12);
+  // step = floor((wave-1) / 2). Wave 3 is step 1.
+  const stepped = zombotsWavePlan(3, 1);
+  assertEquals(stepped.count, 10);
   assertEquals(stepped.step, 1);
   assertEquals(
     stepped.health,
@@ -107,28 +107,30 @@ Deno.test("zombotsWavePlan scales with humans and steps on the stock table", () 
     stepped.meleeDamage,
     ZOMBOTS_TUNING.zombie.baseMeleeDamage + ZOMBOTS_TUNING.zombie.meleeDamagePerStep,
   );
+  assertEquals(zombotsWavePlan(4, 1).count, 12);
+  assertEquals(zombotsWavePlan(4, 1).step, 1);
   assertEquals(zombotsWavePlan(4, 4).count, 34);
   assertEquals(zombotsWavePlan(4, 4).step, 1);
 
-  // step = floor((wave-1) / 3). Wave 22 is step 7, wave 25 is step 8.
-  const atStep7 = zombotsWavePlan(22, 1);
-  const pastCap = zombotsWavePlan(25, 1);
-  assertEquals(atStep7.step, 7);
+  // Wave 11 is step 5 (reaches speed cap 0.85), wave 13 is step 6 (past cap).
+  const atCap = zombotsWavePlan(11, 1);
+  const pastCap = zombotsWavePlan(13, 1);
+  assertEquals(atCap.step, 5);
   assertEquals(
-    atStep7.health,
-    ZOMBOTS_TUNING.zombie.baseHealth + ZOMBOTS_TUNING.zombie.healthPerStep * 7,
+    atCap.health,
+    ZOMBOTS_TUNING.zombie.baseHealth + ZOMBOTS_TUNING.zombie.healthPerStep * 5,
   );
-  assertEquals(atStep7.speedScale <= ZOMBOTS_TUNING.zombie.maxSpeedScale, true);
-  assertEquals(pastCap.step, 8);
+  assertEquals(atCap.speedScale <= ZOMBOTS_TUNING.zombie.maxSpeedScale, true);
+  assertEquals(pastCap.step, 6);
   assertEquals(pastCap.speedScale, ZOMBOTS_TUNING.zombie.maxSpeedScale);
   assertEquals(
     pastCap.health,
-    ZOMBOTS_TUNING.zombie.baseHealth + ZOMBOTS_TUNING.zombie.healthPerStep * 8,
+    ZOMBOTS_TUNING.zombie.baseHealth + ZOMBOTS_TUNING.zombie.healthPerStep * 6,
   );
   assertEquals(
     pastCap.meleeDamage,
     ZOMBOTS_TUNING.zombie.baseMeleeDamage +
-      ZOMBOTS_TUNING.zombie.meleeDamagePerStep * 8,
+      ZOMBOTS_TUNING.zombie.meleeDamagePerStep * 6,
   );
   const uncapped = ZOMBOTS_TUNING.zombie.baseSpeedScale +
     ZOMBOTS_TUNING.zombie.speedScalePerStep * pastCap.step;
@@ -140,8 +142,8 @@ Deno.test("zombotsWavePlan scales with humans and steps on the stock table", () 
   assertEquals(zombotsWavePlan(1, 99).count, zombotsWavePlan(1, 4).count);
   assertEquals(zombotsWavePlan(1, 1.9).humans, 1);
   assertEquals(zombotsWavePlan(0, 1), one);
-  assertEquals(zombotsWavePlan(4.9, 1).wave, 4);
-  assertEquals(zombotsWavePlan(4.9, 1).count, stepped.count);
+  assertEquals(zombotsWavePlan(3.9, 1).wave, 3);
+  assertEquals(zombotsWavePlan(3.9, 1).count, stepped.count);
 
   const custom = withTuning({
     waves: { baseCount: 1, growthPerWave: 10, stepEveryWaves: 2 },
