@@ -12,8 +12,14 @@ import {
   WINDOW_PART_NONE,
   WINDOW_PART_PANE,
   type WindowBody,
+  windowIdAtSpan,
   windowPartPassable,
 } from "../../../shared/world/wallWindows.ts";
+import {
+  type ZombotsLayout,
+  zombotsLayout,
+  zombotsSealedWindowIds,
+} from "../../../shared/zombots/zombotsLayout.ts";
 import {
   DOOR_CLOSED_STANDOFF,
   DOOR_POST_WIDTH,
@@ -87,6 +93,8 @@ type Segment = {
   yMax: number;
   /** `WINDOW_PART_*` from wallWindows.ts. */
   windowPart: number;
+  /** Zombots pane into a closure not unlocked yet: zombies meet it too. */
+  zombieSealed: boolean;
 };
 type Vec3 = { x: number; y: number; z: number };
 
@@ -156,6 +164,13 @@ export class MapCollision {
   private readonly doorBlocks: Segment[] = [];
   /** Sliding doors opened at runtime, in the order they opened. */
   private readonly openDoors: string[] = [];
+  /** Zombots pane segments with their window id at the same index. */
+  private readonly paneWindowIds: string[] = [];
+  private readonly panes: Segment[] = [];
+  /** Lazily built zombots layout, for the window seals. */
+  private layoutCache: ZombotsLayout | null = null;
+  /** Window ids sealed to zombies; null = recompute (start, door opened). */
+  private sealedWindows: string[] | null = null;
   /**
    * When true, resolvePosition allows a short walk-in past the door plane.
    * Keep false while doors are closed so players don't clip into the sealed
@@ -190,13 +205,22 @@ export class MapCollision {
       );
       for (let s = 0; s < spans.length; s++) {
         const span = spans[s]!;
-        this.walls.push({
+        const segment: Segment = {
           a: copyVec2(span.a),
           b: copyVec2(span.b),
           yMin: span.yMin,
           yMax: span.yMax,
           windowPart: span.windowPart,
-        });
+          zombieSealed: false,
+        };
+        this.walls.push(segment);
+        if (span.windowPart === WINDOW_PART_PANE) {
+          const id = windowIdAtSpan(w.id, span.a, span.b, map.windows);
+          if (id !== null) {
+            this.paneWindowIds.push(id);
+            this.panes.push(segment);
+          }
+        }
       }
     }
     const doors = map.doors ?? [];
@@ -215,6 +239,7 @@ export class MapCollision {
         yMin: 0,
         yMax: WALL_HEIGHT,
         windowPart: WINDOW_PART_NONE,
+        zombieSealed: false,
       };
       this.walls.push(segment);
       this.doorBlockIds.push(door.id);
@@ -254,6 +279,7 @@ export class MapCollision {
     this.doorBlocks.length = keep;
     this.doorBlockIds.length = keep;
     this.openDoors.push(doorId);
+    this.sealedWindows = null;
     removeSegments(this.walls, drop);
     removeSegments(this.solids, drop);
     // Indices shift after the removal, so rebuild the grid and scratch.
@@ -275,6 +301,29 @@ export class MapCollision {
     const out: string[] = [];
     for (let i = 0; i < this.openDoors.length; i++) out.push(this.openDoors[i]!);
     return out;
+  }
+
+  /**
+   * Zombots: windows zombies meet as solid wall right now, because no opened
+   * door joins their player closure to phase 1. Same rule as the server's
+   * `sealedZombieWindowIds`. Empty on other maps.
+   */
+  public sealedZombieWindowIds(): readonly string[] {
+    if (this.sealedWindows !== null) return this.sealedWindows;
+    if (this.map.mirrorMode !== "zombots" || this.panes.length === 0) {
+      this.sealedWindows = [];
+      return this.sealedWindows;
+    }
+    if (this.layoutCache === null) this.layoutCache = zombotsLayout(this.map);
+    const sealed = zombotsSealedWindowIds(
+      this.layoutCache,
+      (doorId) => this.isSlidingDoorOpen(doorId),
+    );
+    for (let i = 0; i < this.panes.length; i++) {
+      this.panes[i]!.zombieSealed = sealed.indexOf(this.paneWindowIds[i]!) >= 0;
+    }
+    this.sealedWindows = sealed;
+    return sealed;
   }
 
   /**
@@ -368,6 +417,10 @@ export class MapCollision {
     x: number;
     z: number;
   } {
+    // Window seals ride on the pane segments; refresh them before moving.
+    if (this.zombieClimb && this.sealedWindows === null) {
+      this.sealedZombieWindowIds();
+    }
     let px = x;
     let pz = z;
 
@@ -384,7 +437,10 @@ export class MapCollision {
       pz - pad,
       pz + pad,
       (seg) => {
-        if (windowPartPassable(seg.windowPart, this.zombieClimb)) return;
+        if (
+          !seg.zombieSealed &&
+          windowPartPassable(seg.windowPart, this.zombieClimb)
+        ) return;
         if (!bodyOverlapsSlab(feetY, headY, seg.yMin, seg.yMax)) return;
         let ax = seg.a.x;
         let az = seg.a.z;
@@ -973,6 +1029,7 @@ function addEdgeWithGap(
       yMin: 0,
       yMax: WALL_HEIGHT,
       windowPart: WINDOW_PART_NONE,
+      zombieSealed: false,
     });
     return;
   }
@@ -1001,6 +1058,7 @@ function addEdgeWithGap(
         yMin: 0,
         yMax: WALL_HEIGHT,
         windowPart: WINDOW_PART_NONE,
+        zombieSealed: false,
       });
     }
     cursor = g.t1;
@@ -1012,6 +1070,7 @@ function addEdgeWithGap(
       yMin: 0,
       yMax: WALL_HEIGHT,
       windowPart: WINDOW_PART_NONE,
+      zombieSealed: false,
     });
   }
 }

@@ -1383,6 +1383,8 @@ function writeZombotsHud(w: ByteWriter, o: Record<string, unknown>): void {
     w.str8(String(p.id ?? ""));
     w.u32(u32Of(p.points));
     w.u8(p.downed ? 1 : 0);
+    w.u32(u32Of(p.totalPoints ?? p.points));
+    w.u32(u32Of(p.headshots));
   }
   const revives = Array.isArray(o.revives)
     ? o.revives as Array<Record<string, unknown>>
@@ -1422,7 +1424,13 @@ function readZombotsHud(r: ByteReader): Record<string, unknown> {
   const np = r.u8();
   const players: Array<Record<string, unknown>> = [];
   for (let i = 0; i < np; i++) {
-    players.push({ id: r.str8(), points: r.u32(), downed: r.u8() === 1 });
+    players.push({
+      id: r.str8(),
+      points: r.u32(),
+      downed: r.u8() === 1,
+      totalPoints: r.u32(),
+      headshots: r.u32(),
+    });
   }
   out.players = players;
   const nr = r.u8();

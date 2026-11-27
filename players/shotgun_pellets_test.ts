@@ -256,7 +256,8 @@ Deno.test("falloff at range: pellets that land do reduced damage", () => {
 });
 
 Deno.test("a single far pellet (200+ units) still deals ≥ 1 damage", () => {
-  // Lowest roll (-5) on a floor-scaled pellet would reach 0 without the clamp.
+  // Lowest roll (-5) on a floor-scaled pellet. The 0-damage clamp itself is
+  // covered by clampHitDamage in shared/sim/weapons_test.ts.
   const { shoot, place, players } = rig({
     samples: [...BLOOM, ...PATTERN, 0],
     shooterZ: 220,
@@ -267,8 +268,11 @@ Deno.test("a single far pellet (200+ units) still deals ≥ 1 damage", () => {
   assertExists(outcome?.damages);
   const hits = outcome.shot.pellets!.filter((p) => p.hitId === "v");
   assertEquals(hits.length, 1);
-  assertEquals(outcome.damages[0]!.damage, 1);
-  assertEquals(victim.health, 99);
+  const dealt = outcome.damages[0]!.damage;
+  // Lowest roll: -5 off the floor-scaled pellet, clamped at 1.
+  assertEquals(dealt, Math.max(1, Math.round(expectedDamage(outcome.shot, "v")) - 5));
+  assert(dealt >= 1);
+  assertEquals(victim.health, 100 - dealt);
 });
 
 Deno.test("teamfire: mirror applied once for the summed damage", () => {

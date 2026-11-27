@@ -166,8 +166,8 @@ const HUD = {
   openDoorIds: ["door-1", "door-2"],
   doorPaid: [{ doorId: "door-3", paid: 3000 }],
   players: [
-    { id: "p1", points: 1250, downed: false },
-    { id: "p2", points: 0, downed: true },
+    { id: "p1", points: 1250, totalPoints: 4500, headshots: 18, downed: false },
+    { id: "p2", points: 0, totalPoints: 900, headshots: 3, downed: true },
   ],
   revives: [{ reviverId: "p1", targetId: "p2", presses: 13 }],
   events: [

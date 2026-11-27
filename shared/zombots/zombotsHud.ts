@@ -18,6 +18,10 @@ import type { ZombotsDoorPaid } from "./zombotsDoors.ts";
 export type ZombotsHudPlayer = {
   id: ZombotsPlayerId;
   points: number;
+  /** Total zompoints gathered in this run (start + all awards, never reduced by spends). */
+  totalPoints?: number;
+  /** Total headshot hits landed on zombies in this run. */
+  headshots?: number;
   downed: boolean;
 };
 
@@ -66,6 +70,7 @@ export function buildZombotsHud(input: {
   match: ZombotsMatch;
   ledger: ZompointsLedger;
   revive: ReviveTracker;
+  headshots?: ReadonlyMap<ZombotsPlayerId, number>;
   openDoorIds: readonly string[];
   doorPaid?: readonly ZombotsDoorPaid[];
   nextWaveAtTick: number;
@@ -78,7 +83,13 @@ export function buildZombotsHud(input: {
   const players: ZombotsHudPlayer[] = [];
   const revives: ZombotsHudRevive[] = [];
   for (const id of match.humans) {
-    players.push({ id, points: ledger.get(id), downed: match.downed.has(id) });
+    players.push({
+      id,
+      points: ledger.get(id),
+      totalPoints: ledger.total(id),
+      headshots: input.headshots?.get(id) ?? 0,
+      downed: match.downed.has(id),
+    });
     const row = revive.progress(id);
     if (row && row.presses > 0) {
       revives.push({ reviverId: id, targetId: row.targetId, presses: row.presses });

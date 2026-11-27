@@ -3,9 +3,11 @@ import { loadMapFile } from "../../world/loadMap.ts";
 import { zombotsRoomGraph } from "./zombotsDoors.ts";
 import {
   ZOMBOTS_LAYOUT_MIN_ROOM_AREA,
+  zombotsDoorPhases,
   zombotsLayout,
   type ZombotsLayoutMap,
   zombotsSpawnGate,
+  zombotsUnlockedPhases,
 } from "./zombotsLayout.ts";
 
 /**
@@ -328,7 +330,20 @@ Deno.test("Zombots-01: three phases, two zombie closures, seven pillar slivers, 
     ["win_9fkd424m", "win_nubalolo", "win_0obiusvo", "win_9oos7zdn"],
     ["win_qb3iqdzz", "win_6d5939y0", "win_vgwts1ey", "win_8qonrdg7", "win_1bv3ncnp"],
   ]);
-  assertEquals(layout.rackPhase.map((r) => [r.weapon, r.phase]), [["pistol", 1], ["rifle", 2], ["shotgun", 3]]);
+  // One of each gun in its own phase, then later-phase repeats, a power rack per
+  // phase and the dis-rack-tor in phase 3.
+  assertEquals(layout.rackPhase.map((r) => [r.weapon, r.phase]), [
+    ["pistol", 1],
+    ["rifle", 2],
+    ["shotgun", 3],
+    ["pistol", 2],
+    ["rifle", 3],
+    ["pistol", 3],
+    ["power", 1],
+    ["power", 2],
+    ["power", 3],
+    ["distractor", 3],
+  ]);
 
   // The one non-gap warning: a window straight between phase 2 and phase 3.
   const other = layout.warnings.filter((w) => !w.startsWith("gap near"));
@@ -338,4 +353,34 @@ Deno.test("Zombots-01: three phases, two zombie closures, seven pillar slivers, 
   // Both zombie closures have a phase 1 window, so every spawn is live from the start.
   const ids = map.zombieSpawns!.map((s) => s.id);
   assertEquals(ids.filter(zombotsSpawnGate(layout, 1)).length, 9);
+});
+
+Deno.test("Zombots-01: door phases chain 1-2-3, and doors unlock phases only in order", async () => {
+  const map = await loadMapFile(
+    new URL("../../maps/zombots/Zombots-01.doors.json", import.meta.url).pathname,
+  );
+  const layout = zombotsLayout(map);
+  const doorPhases = zombotsDoorPhases(layout);
+  // Same answer as the room graph's own door split.
+  const graph = zombotsRoomGraph(map);
+  assertEquals(layout.doorRooms, graph.doorRooms);
+  const byPair = new Map([...doorPhases].map(([id, pair]) => [pair.join("-"), id]));
+  const first = byPair.get("1-2")!;
+  const second = byPair.get("2-3")!;
+  assert(first && second);
+
+  assertEquals(zombotsUnlockedPhases(layout, doorPhases, []), 1);
+  assertEquals(zombotsUnlockedPhases(layout, doorPhases, [first]), 2);
+  // The phase 2-3 door alone unlocks nothing: phase 2 isn't reachable yet.
+  assertEquals(zombotsUnlockedPhases(layout, doorPhases, [second]), 1);
+  assertEquals(zombotsUnlockedPhases(layout, doorPhases, [second, first]), 3);
+});
+
+Deno.test("zombotsUnlockedPhases: without a valid chain, each open door is one phase, up to 3", () => {
+  const none = new Map<string, readonly [number, number]>();
+  const layout = { phases: null };
+  assertEquals(zombotsUnlockedPhases(layout, none, []), 1);
+  assertEquals(zombotsUnlockedPhases(layout, none, ["a", "b"]), 3);
+  assertEquals(zombotsUnlockedPhases(layout, none, ["a", "b", "c", "d"]), 3);
+  assertEquals(zombotsDoorPhases({ phases: null, doorRooms: [] }).size, 0);
 });

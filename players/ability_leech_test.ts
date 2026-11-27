@@ -2,7 +2,7 @@
  * Skill D — Leech (Medic, passive, lifesteal).
  * Run: deno test -A server/players/ability_leech_test.ts
  */
-import { assertEquals, assertExists } from "jsr:@std/assert@1";
+import { assert, assertEquals, assertExists } from "jsr:@std/assert@1";
 import { MAX_HEALTH, SPAWN_INVULN_TICKS } from "../protocol/network.ts";
 import { skillValueForOwned } from "../shared/sim/skills.ts";
 import { MapCollision } from "../world/MapCollision.ts";
@@ -110,9 +110,10 @@ Deno.test("leech: unrestricted (bots) heals floor(damage * 0.15) on enemy hit", 
 
   const applied = PISTOL.headDamage;
   assertEquals(victim.health, 100 - applied);
-  // Max tier 15%: floor(55 * 0.15) = 8
-  assertEquals(Math.floor(applied * 0.15), 8);
-  assertEquals(shooter.health, 50 + 8);
+  // Max tier 15%: floor(headDamage * 0.15).
+  const heal = Math.floor(applied * 0.15);
+  assert(heal > 0);
+  assertEquals(shooter.health, 50 + heal);
 });
 
 Deno.test("leech: tier I heals floor(damage * 0.10)", () => {

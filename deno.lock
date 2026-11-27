@@ -267,8 +267,8 @@
     "base64id@2.0.0": {
       "integrity": "sha512-lGe34o6EHj9y3Kts9R4ZYs/Gr+6N7MCaMlIFA3F1R2O5/m7K06AxfSeO5530PEERE6/WyEg3lsuyw4GHlPZHog=="
     },
-    "body-parser@1.20.6": {
-      "integrity": "sha512-p5tAzS57i5MV9fZFDj9LeIiTZEufbSe2eDozP+ElheSUq1m74CRq1jI4mYNDdVs9vQztXFLuk/Gd6BWTdwRJ5g==",
+    "body-parser@1.20.9": {
+      "integrity": "sha512-FISIQxV5u91Y9gvuFq3q/tA/qTqLJn3AhRcEvyozyhJTh5OBFFtv827AdHU7Rbyct4r+Ba1/99oFa1Y3yuFsdw==",
       "dependencies": [
         "bytes",
         "content-type",
@@ -278,7 +278,7 @@
         "http-errors",
         "iconv-lite",
         "on-finished",
-        "qs",
+        "qs@6.16.2",
         "raw-body",
         "type-is",
         "unpipe"
@@ -458,7 +458,7 @@
         "parseurl",
         "path-to-regexp",
         "proxy-addr",
-        "qs",
+        "qs@6.15.3",
         "range-parser",
         "safe-buffer",
         "send",
@@ -689,6 +689,13 @@
     },
     "qs@6.15.3": {
       "integrity": "sha512-O9gl3zCl5h5blw1KGUzQKhA5oUXSl8rwUIM5o0S3nCXMliSvy5Dzx7/DJcI+SwgICv+IneSZwhBh1oSyEHA71A==",
+      "dependencies": [
+        "es-define-property",
+        "side-channel"
+      ]
+    },
+    "qs@6.16.2": {
+      "integrity": "sha512-VYdnB5S7/0IeXzBacUtwNAaM6d7Y/PgYnNC7bJCI6meqA/OgnsQbZMtVW8Dt2D1PHgbHGtYmhSoEIgvt7xZ2ZA==",
       "dependencies": [
         "es-define-property",
         "side-channel"

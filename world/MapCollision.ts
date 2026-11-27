@@ -11,12 +11,18 @@ import {
   collisionWallSpans,
   WINDOW_PART_PANE,
   type WindowBody,
+  windowIdAtSpan,
   windowPartPassable,
 } from "../shared/world/wallWindows.ts";
 import {
   buildWindowCrawlPortals,
   type WindowCrawlPortal,
 } from "../shared/zombots/windowCrawl.ts";
+import {
+  type ZombotsLayout,
+  zombotsLayout,
+  zombotsSealedWindowIds,
+} from "../shared/zombots/zombotsLayout.ts";
 import type { MoveCollision } from "../shared/sim/moveStep.ts";
 import {
   DOOR_CLOSED_STANDOFF,
@@ -87,6 +93,11 @@ type Segment = {
   yMax: number;
   /** `WINDOW_PART_*` from wallWindows.ts; absent = no window role. */
   windowPart?: number;
+  /**
+   * Zombots pane into a player closure that isn't unlocked yet: blocks
+   * zombie bodies too. See {@link zombotsSealedWindowIds}.
+   */
+  zombieSealed?: boolean;
 };
 type Vec3 = { x: number; y: number; z: number };
 
@@ -179,8 +190,16 @@ export class MapCollision {
   private readonly zombieClimb: boolean;
   /** Lazily built {@link bodyCollision} views. */
   private readonly bodyViews: { human?: MoveCollision; zombie?: MoveCollision } = {};
-  /** Lazily built zombots window-crawl portals. */
+  /** Lazily built zombots window-crawl portals (all of them). */
   private crawlPortalsCache: readonly WindowCrawlPortal[] | null = null;
+  /** {@link crawlPortalsCache} minus sealed windows; dropped on door open. */
+  private openCrawlPortalsCache: readonly WindowCrawlPortal[] | null = null;
+  /** Zombots window id → its pane segments. */
+  private readonly panesByWindow = new Map<string, Segment[]>();
+  /** Lazily built zombots layout, for the window seals. */
+  private layoutCache: ZombotsLayout | null = null;
+  /** Window ids sealed to zombies; null = recompute (start, door opened). */
+  private sealedWindows: readonly string[] | null = null;
 
   /**
    * `windowBody` picks the window rule plain queries use (default human).
@@ -204,13 +223,22 @@ export class MapCollision {
         zombots,
       );
       for (const span of spans) {
-        this.walls.push({
+        const segment: Segment = {
           a: { x: span.a.x, z: span.a.z },
           b: { x: span.b.x, z: span.b.z },
           yMin: span.yMin,
           yMax: span.yMax,
           ...(span.windowPart === 0 ? {} : { windowPart: span.windowPart }),
-        });
+        };
+        this.walls.push(segment);
+        if (span.windowPart === WINDOW_PART_PANE) {
+          const id = windowIdAtSpan(w.id, span.a, span.b, map.windows);
+          if (id !== null) {
+            const list = this.panesByWindow.get(id);
+            if (list) list.push(segment);
+            else this.panesByWindow.set(id, [segment]);
+          }
+        }
       }
     }
     for (const door of map.doors ?? []) {
@@ -246,6 +274,9 @@ export class MapCollision {
     if (!blocks) return false;
     this.doorBlocks.delete(doorId);
     this.openDoors.push(doorId);
+    // A newly reachable closure unseals its windows on the next zombie query.
+    this.sealedWindows = null;
+    this.openCrawlPortalsCache = null;
     removeSegments(this.walls, blocks);
     removeSegments(this.solids, blocks);
     // Indices shift after the splice; a full rebuild is well under a
@@ -449,12 +480,43 @@ export class MapCollision {
     return view;
   }
 
-  /** Zombots window portals a zombie can switch into window-crawl at. */
+  /**
+   * Zombots window portals a zombie can switch into window-crawl at. Windows
+   * into a closure no opened door reaches yet are left out.
+   */
   public windowCrawlPortals(): readonly WindowCrawlPortal[] {
+    if (this.openCrawlPortalsCache !== null) return this.openCrawlPortalsCache;
     if (this.crawlPortalsCache === null) {
       this.crawlPortalsCache = buildWindowCrawlPortals(this.map);
     }
-    return this.crawlPortalsCache;
+    const sealed = this.sealedZombieWindowIds();
+    this.openCrawlPortalsCache = sealed.length === 0
+      ? this.crawlPortalsCache
+      : this.crawlPortalsCache.filter((p) => !sealed.includes(p.windowId));
+    return this.openCrawlPortalsCache;
+  }
+
+  /**
+   * Zombots: windows zombies meet as solid wall right now, because no opened
+   * door joins their player closure to phase 1. Empty on other maps.
+   */
+  public sealedZombieWindowIds(): readonly string[] {
+    if (this.sealedWindows !== null) return this.sealedWindows;
+    if (this.map.mirrorMode !== "zombots" || this.panesByWindow.size === 0) {
+      this.sealedWindows = [];
+      return this.sealedWindows;
+    }
+    if (this.layoutCache === null) this.layoutCache = zombotsLayout(this.map);
+    const sealed = zombotsSealedWindowIds(
+      this.layoutCache,
+      (doorId) => this.openDoors.includes(doorId),
+    );
+    for (const [id, panes] of this.panesByWindow) {
+      const on = sealed.includes(id);
+      for (const pane of panes) pane.zombieSealed = on;
+    }
+    this.sealedWindows = sealed;
+    return sealed;
   }
 
   private resolveBody(
@@ -468,6 +530,8 @@ export class MapCollision {
   ): { x: number; z: number } {
     let px = x;
     let pz = z;
+    // Window seals ride on the pane segments; refresh them before a zombie moves.
+    if (zombieClimb && this.sealedWindows === null) this.sealedZombieWindowIds();
 
     // Outer bounds (inset by radius); optional short walk-in pocket at doors.
     const clamped0 = this.clampBounds(px, pz, radius);
@@ -484,6 +548,7 @@ export class MapCollision {
       (seg) => {
         if (
           seg.windowPart !== undefined &&
+          seg.zombieSealed !== true &&
           windowPartPassable(seg.windowPart, zombieClimb)
         ) return;
         if (!bodyOverlapsSlab(feetY, headY, seg.yMin, seg.yMax)) return;

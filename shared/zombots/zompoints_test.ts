@@ -122,7 +122,24 @@ Deno.test("spend refuses and leaves the purse untouched", () => {
   }
   assertEquals(ledger.trySpend("a", 1, "door"), { ok: false, points: 0 });
   assertEquals(ledger.get("a"), 0);
+  assertEquals(ledger.total("a"), START);
   assertEquals(ledger.trySpend("ghost", 1, "door"), { ok: false, points: 0 });
+  assertEquals(ledger.total("ghost"), 0);
+});
+
+Deno.test("total tracks all gathered zompoints across awards and spends", () => {
+  const ledger = new ZompointsLedger();
+  ledger.join("a");
+  assertEquals(ledger.total("a"), START);
+  ledger.award("a", "hit");
+  ledger.award("a", "kill");
+  ledger.awardWaveSurvived(["a"]);
+  const gathered = START + HIT + KILL + WAVE;
+  assertEquals(ledger.get("a"), gathered);
+  assertEquals(ledger.total("a"), gathered);
+  assertEquals(ledger.trySpend("a", KILL + WAVE, "door").ok, true);
+  assertEquals(ledger.get("a"), START + HIT);
+  assertEquals(ledger.total("a"), gathered);
 });
 
 Deno.test("leave drops the purse and the next join reseeds", () => {
@@ -131,7 +148,25 @@ Deno.test("leave drops the purse and the next join reseeds", () => {
   ledger.award("a", "kill");
   ledger.leave("a");
   assertEquals(ledger.get("a"), 0);
+  assertEquals(ledger.total("a"), 0);
   ledger.leave("a");
   assertEquals(ledger.join("a")?.points, START);
   assertEquals(ledger.get("a"), START);
+  assertEquals(ledger.total("a"), START);
+});
+
+Deno.test("a head hit pays headHit, a body hit pays hit", () => {
+  const HEAD_HIT = ZOMBOTS_TUNING.points.headHit;
+  assertEquals(HEAD_HIT, 10);
+  const ledger = new ZompointsLedger();
+  ledger.join("a");
+  assertEquals(ledger.awardHit("a", true), {
+    kind: "pointsChanged",
+    playerId: "a",
+    points: START + HEAD_HIT,
+    delta: HEAD_HIT,
+    reason: "hit",
+  });
+  assertEquals(ledger.awardHit("a", false).points, START + HEAD_HIT + HIT);
+  assertEquals(ledger.total("a"), START + HEAD_HIT + HIT);
 });

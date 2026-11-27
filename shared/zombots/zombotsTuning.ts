@@ -53,11 +53,22 @@ export const ZOMBOTS_TUNING = {
     miniModelScale: 0.75,
     /** Speed multiplier for a fast mini zombie relative to normal wave zombies. */
     miniSpeedMultiplier: 2,
+    /**
+     * Every Nth zombie spawned in a run (7, 14, 21, ...) is a slow, tanky
+     * hunched grandpa. A spawn that is both (70, 140, ...) is a mini.
+     */
+    grandpaEvery: 7,
+    /** Speed multiplier for a grandpa relative to normal wave zombies. */
+    grandpaSpeedMultiplier: 0.5,
+    /** Health multiplier for a grandpa relative to normal wave zombies. */
+    grandpaHealthMultiplier: 1.5,
   },
 
   points: {
     start: 100,
     hit: 5,
+    /** A hit that lands in the head zone pays this instead of `hit`. */
+    headHit: 10,
     kill: 50,
     waveSurvived: 250,
   },
@@ -106,6 +117,10 @@ export const ZOMBOTS_TUNING = {
     killAfterMs: 45_000,
     /** Hard ceiling on how long any single zombie may stay alive. */
     maxLifetimeMs: 240_000,
+    /** Zombies this close (m) to an active dis-rack-tor lure are holding, not stuck. */
+    lureHoldRadius: 4.5,
+    /** A relocate never lands within this distance (m) of another body. */
+    relocateClearRadius: 1.5,
   },
 } as const;
 

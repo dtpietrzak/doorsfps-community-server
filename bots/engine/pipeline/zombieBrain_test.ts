@@ -415,6 +415,7 @@ Deno.test("zombie brain: stuckWTurn peels out of window steer when blocked", () 
     isPlayerRoom: () => false,
     doorCells: [],
     openDoors: [],
+    sealedWindows: [],
     chaseCells: [],
     chaseFields: [],
   };

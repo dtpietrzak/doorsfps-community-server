@@ -18,9 +18,6 @@ import type { PlayerManager, ShootOutcome } from "../players/PlayerManager.ts";
 import type { Player } from "../players/Player.ts";
 import type { ZombotsSimFact } from "../players/simTickResult.ts";
 import { ZOMBOTS_SIM_RULES } from "../players/zombotsSimRules.ts";
-import type {
-  CheckpointZombotsRunState,
-} from "../replay/authoritativeCheckpoint.ts";
 import {
   type GameOverPacket,
   type InteractPacket,
@@ -30,10 +27,10 @@ import {
 } from "../protocol/network.ts";
 import {
   Armory,
-  gunRackCost,
   isGunRackEntry,
-  withinRackReach,
+  tryBuyFromRack,
   ZOMBOTS_RACK_WEAPON_ID,
+  type ZombotsGunRack,
   type ZombotsRack,
 } from "../shared/zombots/armory.ts";
 import {
@@ -46,9 +43,9 @@ import type {
   ZombotsEvent,
   ZombotsIntent,
   ZombotsSpawnGate,
-  ZombotsSpawnPoint,
 } from "../shared/zombots/types.ts";
-import { ZombotsDoorState, zombotsRoomGraph } from "../shared/zombots/zombotsDoors.ts";
+import { ZombotsDoorState } from "../shared/zombots/zombotsDoors.ts";
+import { type ZombieWatchStats, ZombieWatch } from "../shared/zombots/zombieWatch.ts";
 import {
   buildZombotsHud,
   type ZombotsFeedEvent,
@@ -60,8 +57,10 @@ import {
 } from "../shared/zombots/zombotsInteract.ts";
 import {
   type ZombotsLayout,
+  zombotsDoorPhases,
   zombotsLayout,
   zombotsSpawnGate,
+  zombotsUnlockedPhases,
 } from "../shared/zombots/zombotsLayout.ts";
 import { ZombotsMatch } from "../shared/zombots/ZombotsMatch.ts";
 import { ZOMBOTS_TUNING } from "../shared/zombots/zombotsTuning.ts";
@@ -155,17 +154,8 @@ type Run = {
   armory: Armory;
   doors: ZombotsDoorState;
   distractor: DistractorTracker;
-};
-
-/** Per-zombie stuck-detection state for soft relocate + timeout kill. */
-type ZombieWatch = {
-  spawnedAtTick: number;
-  anchorX: number;
-  anchorZ: number;
-  lastProgressTick: number;
-  stagnantSinceTick: number;
-  lastHealth: number;
-  relocates: number;
+  /** Per-human headshot hits landed on zombies in this run. */
+  headshots: Map<string, number>;
 };
 
 export class ZombotsRuntime {
@@ -177,8 +167,8 @@ export class ZombotsRuntime {
   private pendingInteracts = new Map<string, InteractPacket>();
   /** Live zombie bot ids, spawn order. */
   private readonly zombies = new Set<string>();
-  /** Per-zombie progress watch for stuck recovery. */
-  private readonly zombieWatch = new Map<string, ZombieWatch>();
+  /** Stuck-zombie safety net (rules in shared/zombots/zombieWatch.ts). */
+  private readonly watch = new ZombieWatch();
   private zombieSeq = 0;
   /** Humans whose client built the map (NetEvents.MapLoaded). */
   readonly loadedPlayerIds = new Set<string>();
@@ -258,6 +248,7 @@ export class ZombotsRuntime {
       match: run.match,
       ledger: run.ledger,
       revive: run.revive,
+      headshots: run.headshots,
       openDoorIds: run.doors.openIds(),
       doorPaid: run.doors.paidDoors(),
       nextWaveAtTick: this.nextWaveAtTick,
@@ -395,29 +386,6 @@ export class ZombotsRuntime {
     return this.run ? this.run.match.wave : null;
   }
 
-  /** Rules objects for an authoritative checkpoint (step 14). */
-  checkpointState(): CheckpointZombotsRunState | undefined {
-    const run = this.run;
-    if (!run) return undefined;
-    const humans = [...run.match.humans];
-    return {
-      phase: run.match.phase,
-      wave: run.match.wave,
-      zombiesLeft: run.match.zombiesLeft,
-      msUntilNextWave: run.match.msUntilNextWave,
-      humans,
-      downed: [...run.match.downed],
-      purses: humans.map((id) => ({ id, points: run.ledger.get(id) })),
-      revives: humans.flatMap((id) => {
-        const row = run.revive.progress(id);
-        return row ? [{ reviverId: id, targetId: row.targetId, presses: row.presses }] : [];
-      }),
-      armed: humans.map((id) => ({ id, weapons: run.armory.armedWeapons(id) })),
-      doorPaid: run.doors.paidDoors(),
-      zombies: [...this.zombies],
-    };
-  }
-
   // ── internals ────────────────────────────────────────────────────────────
 
   /** Rules objects, zombies, collision and armed sets for a new run. */
@@ -425,7 +393,7 @@ export class ZombotsRuntime {
     this.deps.bots.clearZombies();
     this.deps.bots.setZombieLure?.(null);
     this.zombies.clear();
-    this.zombieWatch.clear();
+    this.watch.clear();
     this.zombieSeq = 0;
     this.pendingEvents = [];
     this.pendingInteracts.clear();
@@ -457,6 +425,7 @@ export class ZombotsRuntime {
       armory: new Armory(),
       doors: new ZombotsDoorState(map),
       distractor: new DistractorTracker(),
+      headshots: new Map(),
     };
     this.hudDirty = true;
     this.lastHudKey = "";
@@ -483,6 +452,7 @@ export class ZombotsRuntime {
       run.ledger.leave(id);
       run.armory.leave(id);
       run.revive.leave(id);
+      run.headshots.delete(id);
       this.loadedPlayerIds.delete(id);
     }
     for (const id of [...this.loadedPlayerIds]) {
@@ -516,7 +486,10 @@ export class ZombotsRuntime {
         if (by && d.damage > 0) {
           this.markZombieProgress(d.targetId, tick);
           events.push({ kind: "zombieHit", by, zombieId: d.targetId });
-          this.feed.push(run.ledger.award(by, "hit"));
+          this.feed.push(run.ledger.awardHit(by, d.zone === "head"));
+          if (d.zone === "head") {
+            run.headshots.set(by, (run.headshots.get(by) ?? 0) + 1);
+          }
         }
         if (d.killed) {
           events.push({ kind: "zombieKilled", by, zombieId: d.targetId });
@@ -535,26 +508,17 @@ export class ZombotsRuntime {
   }
 
   private markZombieProgress(id: string, tick: number): void {
-    const w = this.zombieWatch.get(id);
-    if (!w) return;
-    w.lastProgressTick = tick;
-    w.stagnantSinceTick = tick;
     const p = this.deps.players.get(id);
-    if (p) w.lastHealth = p.health;
+    if (p) this.watch.markProgress(id, tick, p.health);
   }
 
   private removeZombie(id: string): void {
-    this.zombieWatch.delete(id);
+    this.watch.forget(id);
     if (!this.zombies.delete(id)) return;
     this.deps.bots.despawnZombie(id);
   }
 
-  /**
-   * Stuck-zombie safety net:
-   * - Relocate after `relocateAfterMs` of no progress (up to `maxRelocates`).
-   * - Auto-kill (no points) after `killAfterMs` of continuous no progress.
-   * - Hard auto-kill ceiling at `maxLifetimeMs` so a wave can never soft-lock.
-   */
+  /** Apply the stuck-zombie watch's relocates and kills for this tick. */
   private watchStuckZombies(
     run: Run,
     gate: ZombotsSpawnGate,
@@ -562,131 +526,40 @@ export class ZombotsRuntime {
     events: ZombotsEvent[],
   ): void {
     if (this.zombies.size === 0) return;
-    const {
-      progressRadius,
-      relocateAfterMs,
-      maxRelocates,
-      killAfterMs,
-      maxLifetimeMs,
-    } = ZOMBOTS_TUNING.stuck;
-    const progressRadius2 = progressRadius * progressRadius;
+    const players = this.deps.players;
+    const zombies = [];
+    for (const id of this.zombies) {
+      const p = players.get(id);
+      if (p && p.alive) zombies.push({ id, x: p.x, z: p.z, health: p.health });
+    }
+    const humans = [];
+    for (const h of players.humans()) if (h.alive) humans.push({ x: h.x, z: h.z });
     const map = this.deps.map();
+    const decisions = this.watch.step({
+      tick,
+      tickMs: TICK_MS,
+      zombies,
+      humans,
+      lure: run.distractor.activeAt(tick)?.point ?? null,
+      spawns: map.zombieSpawns ?? [],
+      spawnGate: gate,
+      seq: this.zombieSeq,
+    });
     const cx = (map.bounds.minX + map.bounds.maxX) / 2;
     const cz = (map.bounds.minZ + map.bounds.maxZ) / 2;
-
-    const activeLure = run.distractor.activeAt(tick)?.point ?? null;
-    // Zombies gathered around an active dis-rack-tor are intentionally holding.
-    const lureHoldRadius2 = 4.5 * 4.5;
-
-    for (const id of [...this.zombies]) {
-      const p = this.deps.players.get(id);
-      if (!p || !p.alive) continue;
-      let w = this.zombieWatch.get(id);
-      if (!w) {
-        w = {
-          spawnedAtTick: tick,
-          anchorX: p.x,
-          anchorZ: p.z,
-          lastProgressTick: tick,
-          stagnantSinceTick: tick,
-          lastHealth: p.health,
-          relocates: 0,
-        };
-        this.zombieWatch.set(id, w);
+    for (const d of decisions) {
+      if (d.kind === "kill") {
+        this.logStuck(`kill:${d.reason}`, run, d.id, players.get(d.id) ?? { x: NaN, z: NaN }, d.stats);
+        events.push({ kind: "zombieKilled", by: null, zombieId: d.id });
+        this.removeZombie(d.id);
         continue;
       }
-
-      if (activeLure !== null) {
-        const ldx = p.x - activeLure.x;
-        const ldz = p.z - activeLure.z;
-        if (ldx * ldx + ldz * ldz <= lureHoldRadius2) {
-          w.lastProgressTick = tick;
-          w.stagnantSinceTick = tick;
-          w.lastHealth = p.health;
-          continue;
-        }
-      }
-
-      const lifetimeMs = (tick - w.spawnedAtTick) * TICK_MS;
-      if (lifetimeMs >= maxLifetimeMs) {
-        this.logStuck("kill:lifetime", run, id, p, tick, w);
-        events.push({ kind: "zombieKilled", by: null, zombieId: id });
-        this.removeZombie(id);
-        continue;
-      }
-
-      const dx = p.x - w.anchorX;
-      const dz = p.z - w.anchorZ;
-      if (dx * dx + dz * dz >= progressRadius2) {
-        w.anchorX = p.x;
-        w.anchorZ = p.z;
-        w.lastProgressTick = tick;
-        w.stagnantSinceTick = tick;
-      } else if (p.health < w.lastHealth) {
-        w.lastProgressTick = tick;
-        w.stagnantSinceTick = tick;
-      }
-      w.lastHealth = p.health;
-
-      const noProgressMs = (tick - w.lastProgressTick) * TICK_MS;
-      if (noProgressMs >= killAfterMs) {
-        this.logStuck("kill:stagnant", run, id, p, tick, w);
-        events.push({ kind: "zombieKilled", by: null, zombieId: id });
-        this.removeZombie(id);
-        continue;
-      }
-
-      const stagnantMs = (tick - w.stagnantSinceTick) * TICK_MS;
-      if (stagnantMs >= relocateAfterMs && w.relocates < maxRelocates) {
-        const spawn = this.pickRelocateSpawn(gate, p.x, p.z, w.relocates, progressRadius2);
-        if (!spawn) continue;
-        const oldPos = { x: p.x, z: p.z };
-        const yaw = Math.atan2(-(cx - spawn.p.x), -(cz - spawn.p.z));
-        p.applySpawn({ x: spawn.p.x, z: spawn.p.z, yaw }, tick);
-        w.anchorX = spawn.p.x;
-        w.anchorZ = spawn.p.z;
-        w.stagnantSinceTick = tick;
-        w.relocates += 1;
-        this.logStuck("relocate", run, id, oldPos, tick, w, spawn.id);
-      }
+      const p = players.get(d.id);
+      if (!p) continue;
+      const yaw = Math.atan2(-(cx - d.spawn.p.x), -(cz - d.spawn.p.z));
+      p.applySpawn({ x: d.spawn.p.x, z: d.spawn.p.z, yaw }, tick);
+      this.logStuck("relocate", run, d.id, d.from, d.stats, d.spawn.id);
     }
-  }
-
-  private pickRelocateSpawn(
-    gate: ZombotsSpawnGate,
-    x: number,
-    z: number,
-    relocates: number,
-    minDist2: number,
-  ): ZombotsSpawnPoint | null {
-    const all = this.deps.map().zombieSpawns ?? [];
-    if (all.length === 0) return null;
-    const open = all.filter((s) => gate(s.id));
-    const pool = open.length > 0 ? open : all;
-    const far = pool.filter((s) => {
-      const dx = s.p.x - x;
-      const dz = s.p.z - z;
-      return dx * dx + dz * dz >= minDist2;
-    });
-    const base = far.length > 0 ? far : pool;
-    const clear = base.filter((s) => {
-      for (const zid of this.zombies) {
-        const other = this.deps.players.get(zid);
-        if (!other || !other.alive) continue;
-        const dx = s.p.x - other.x;
-        const dz = s.p.z - other.z;
-        if (dx * dx + dz * dz < 2.25) return false;
-      }
-      for (const human of this.deps.players.humans()) {
-        if (!human.alive) continue;
-        const dx = s.p.x - human.x;
-        const dz = s.p.z - human.z;
-        if (dx * dx + dz * dz < 2.25) return false;
-      }
-      return true;
-    });
-    const candidates = clear.length > 0 ? clear : base;
-    return candidates[(this.zombieSeq + relocates) % candidates.length]!;
   }
 
   private logStuck(
@@ -694,19 +567,17 @@ export class ZombotsRuntime {
     run: Run,
     zombieId: string,
     pos: { x: number; z: number },
-    tick: number,
-    watch: ZombieWatch,
+    stats: ZombieWatchStats,
     toSpawnId?: string,
   ): void {
     const mapName = this.deps.map().name;
     const room = this.plan?.layout.roomOf(pos);
-    const noProgressS = ((tick - watch.lastProgressTick) * TICK_MS / 1000).toFixed(1);
-    const ageS = ((tick - watch.spawnedAtTick) * TICK_MS / 1000).toFixed(1);
     const dest = toSpawnId ? ` -> spawn=${toSpawnId}` : "";
     console.warn(
       `[zombots] stuck ${action} map=${mapName} wave=${run.match.wave} id=${zombieId}` +
         ` pos=(${pos.x.toFixed(2)},${pos.z.toFixed(2)}) room=${room ?? "wall"}` +
-        ` noProgress=${noProgressS}s age=${ageS}s relocates=${watch.relocates}${dest}`,
+        ` noProgress=${(stats.noProgressMs / 1000).toFixed(1)}s age=${(stats.ageMs / 1000).toFixed(1)}s` +
+        ` relocates=${stats.relocates}${dest}`,
     );
   }
 
@@ -858,42 +729,52 @@ export class ZombotsRuntime {
       }
       return;
     }
-    // Pre-checks the armory repeats, so nothing is charged for a refusal.
-    const downed = run.match.downed.has(playerId);
-    if (downed || !withinRackReach(rack.center, eye)) return;
-    const weaponId = ZOMBOTS_RACK_WEAPON_ID[rack.weapon];
+    this.buyGun(run, playerId, rack, eye, facts);
+  }
+
+  /** Gun rack: the rules decide refusal and price; the sim arms or refills. */
+  private buyGun(
+    run: Run,
+    playerId: string,
+    rack: ZombotsGunRack,
+    eye: { x: number; z: number },
+    facts: ZombotsSimFact[],
+  ): void {
     const players = this.deps.players;
-    const armed = run.armory.isArmed(playerId, weaponId);
-    const cost = gunRackCost(weaponId, armed, players.spareClipsFor(playerId, weaponId));
-    if (players.hasFullSpareClips(playerId, weaponId) || cost <= 0) {
-      this.feed.push({ kind: "rackRefused", playerId, rackId });
-      this.hudDirty = true;
-      return;
-    }
-    const spent = run.ledger.trySpend(playerId, cost, "gunRack");
-    if (!spent.ok) return;
-    this.feed.push(spent.intent);
-    const taken = run.armory.tryTakeFromRack(
+    const weaponId = ZOMBOTS_RACK_WEAPON_ID[rack.weapon];
+    const paid: ZombotsFeedEvent[] = [];
+    const bought = tryBuyFromRack(run.armory, {
       playerId,
       rack,
       eye,
-      run.match.downed.has(playerId),
-    );
-    if (taken.kind !== "ok") return;
-    if (taken.firstTake) {
-      if (!players.armPlayer(playerId, taken.weaponId)) return;
-    } else if (!players.refillPlayerAmmo(playerId, taken.weaponId)) {
+      isDowned: run.match.downed.has(playerId),
+      spareClips: players.spareClipsFor(playerId, weaponId),
+      spareClipsFull: players.hasFullSpareClips(playerId, weaponId),
+      trySpend: (cost) => {
+        const spent = run.ledger.trySpend(playerId, cost, "gunRack");
+        if (spent.ok) paid.push(spent.intent);
+        return spent;
+      },
+    });
+    if (bought.kind === "refused") {
+      if (bought.reason === "full") {
+        this.feed.push({ kind: "rackRefused", playerId, rackId: rack.id });
+        this.hudDirty = true;
+      }
       return;
     }
-    if (taken.intent) {
-      this.feed.push(taken.intent);
-      this.hudDirty = true;
-    }
+    this.feed.push(...paid);
+    this.hudDirty = true;
+    const applied = bought.firstTake
+      ? players.armPlayer(playerId, bought.weaponId)
+      : players.refillPlayerAmmo(playerId, bought.weaponId);
+    if (!applied) return;
+    if (bought.intent) this.feed.push(bought.intent);
     facts.push({
       op: "armed",
       playerId,
-      weaponId: taken.weaponId,
-      refill: !taken.firstTake,
+      weaponId: bought.weaponId,
+      refill: !bought.firstTake,
     });
   }
 
@@ -960,27 +841,10 @@ export class ZombotsRuntime {
     this.hudDirty = true;
   }
 
-  /**
-   * Phases the players can reach: 1, then one more for each opened door on
-   * the phase chain. A door only counts once the phase before it is open.
-   */
+  /** Phases the players can reach (rule in zombotsLayout.ts). */
   private unlockedPhases(run: Run): number {
-    const open = run.doors.openIds();
     const plan = this.plan!;
-    if (!plan.layout.phases) return Math.min(3, 1 + open.length);
-    let unlocked = 1;
-    let grew = true;
-    while (grew) {
-      grew = false;
-      for (const id of open) {
-        const pair = plan.doorPhases.get(id);
-        if (pair && pair[0] <= unlocked && pair[1] > unlocked) {
-          unlocked = pair[1];
-          grew = true;
-        }
-      }
-    }
-    return unlocked;
+    return zombotsUnlockedPhases(plan.layout, plan.doorPhases, run.doors.openIds());
   }
 
   private applyIntent(run: Run, intent: ZombotsIntent, tick: number): GameOverPacket | null {
@@ -1016,7 +880,8 @@ export class ZombotsRuntime {
     const cx = (map.bounds.minX + map.bounds.maxX) / 2;
     const cz = (map.bounds.minZ + map.bounds.maxZ) / 2;
     const spawned = this.deps.bots.spawnZombie({
-      id: `bot:zombie-${n}`,
+      // The client reads the grandpa prefix to hunch the body.
+      id: intent.grandpa ? `bot:zombie-grandpa-${n}` : `bot:zombie-${n}`,
       name: n === 1 ? "zombie" : `zombie${n}`,
       team: ZOMBOTS_ZOMBIE_TEAM,
       x: intent.p.x,
@@ -1033,15 +898,7 @@ export class ZombotsRuntime {
     }
     this.deps.players.setMeleeDamageOverride(spawned.id, intent.meleeDamage);
     this.zombies.add(spawned.id);
-    this.zombieWatch.set(spawned.id, {
-      spawnedAtTick: tick,
-      anchorX: spawned.x,
-      anchorZ: spawned.z,
-      lastProgressTick: tick,
-      stagnantSinceTick: tick,
-      lastHealth: spawned.health,
-      relocates: 0,
-    });
+    this.watch.track(spawned.id, spawned, spawned.health, tick);
     this.pendingEvents.push({
       kind: "zombieSpawned",
       zombieId: spawned.id,
@@ -1100,18 +957,7 @@ export function zombotsPadMap(map: DoorsMap): DoorsMap {
 
 function buildMapPlan(map: DoorsMap): MapPlan {
   const layout = zombotsLayout(map);
-  const doorPhases = new Map<string, readonly [number, number]>();
-  if (layout.phases) {
-    const phaseOfRoom = new Map<number, number>();
-    layout.phases.forEach((room, i) => phaseOfRoom.set(room, i + 1));
-    for (const door of zombotsRoomGraph(map).doorRooms) {
-      if (!door.rooms) continue;
-      const a = phaseOfRoom.get(door.rooms[0]);
-      const b = phaseOfRoom.get(door.rooms[1]);
-      if (a === undefined || b === undefined) continue;
-      doorPhases.set(door.doorId, a < b ? [a, b] : [b, a]);
-    }
-  }
+  const doorPhases = zombotsDoorPhases(layout);
   const racks: ZombotsInteractRack[] = [];
   for (const rack of map.gunRacks ?? []) {
     const placed = layout.rackPhase.find((r) => r.rackId === rack.id);

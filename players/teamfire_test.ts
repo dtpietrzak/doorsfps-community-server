@@ -155,7 +155,8 @@ Deno.test("damage variation marks only upper-tail rolls as critical", () => {
   });
 
   assertExists(outcome?.damages);
-  assertEquals(outcome!.damages![0]!.damage, 60);
+  // Head hit, top-band roll: +5 and critical.
+  assertEquals(outcome!.damages![0]!.damage, PISTOL.headDamage + 5);
   assertEquals(outcome!.damages![0]!.critical, true);
 });
 

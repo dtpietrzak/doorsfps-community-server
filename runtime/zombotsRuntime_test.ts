@@ -188,7 +188,13 @@ Deno.test("zombots: humans join the run only after MapLoaded", () => {
   h.step();
   const hud = h.runtime.hud()!;
   assertEquals(hud.phase, "intermission");
-  assertEquals(hud.players, [{ id: "p1", points: ZOMBOTS_TUNING.points.start, downed: false }]);
+  assertEquals(hud.players, [{
+    id: "p1",
+    points: ZOMBOTS_TUNING.points.start,
+    totalPoints: ZOMBOTS_TUNING.points.start,
+    headshots: 0,
+    downed: false,
+  }]);
   assert(hud.nextWaveAtTick > h.tick);
   // The first block after the join carries the starting purse in its feed.
   const last = h.huds().at(-1)!;
@@ -261,8 +267,54 @@ Deno.test("zombots: hits and kills pay the shooter and despawn the zombie", () =
     h.runtime.hud()!.players[0].points,
     start + ZOMBOTS_TUNING.points.hit + ZOMBOTS_TUNING.points.kill,
   );
+  assertEquals(
+    h.runtime.hud()!.players[0].totalPoints,
+    start + ZOMBOTS_TUNING.points.hit + ZOMBOTS_TUNING.points.kill,
+  );
+  assertEquals(h.runtime.hud()!.players[0].headshots, 0);
   assertEquals(h.players.get(zid), undefined);
   assertEquals(h.despawned, 1);
+});
+
+Deno.test("zombots: headshots and totalPoints persist after spending", () => {
+  const h = harness(OPEN_MAP);
+  h.join("p1");
+  h.steps(FIRST_WAVE_TICKS);
+  const zid = [...h.zombies][0];
+  const headHit: ShootOutcome = {
+    shot: {
+      shooterId: "p1",
+      origin: [0, 0, 0],
+      direction: [0, 0, 1],
+      weapon: WEAPON_PISTOL,
+      hitId: zid,
+      hitZone: "head",
+      hitPoint: null,
+    },
+    damages: [{
+      targetId: zid,
+      shooterId: "p1",
+      damage: 40,
+      health: 60,
+      zone: "head",
+      alive: true,
+      killed: false,
+      critical: true,
+    }],
+  };
+  h.step([headHit]);
+  h.step([headHit]);
+  const start = ZOMBOTS_TUNING.points.start;
+  const expectedTotal = start + 2 * ZOMBOTS_TUNING.points.headHit;
+  assertEquals(h.runtime.hud()!.players[0].headshots, 2);
+  assertEquals(h.runtime.hud()!.players[0].totalPoints, expectedTotal);
+  assertEquals(h.runtime.hud()!.players[0].points, expectedTotal);
+  const ledger = (h.runtime as unknown as {
+    run: { ledger: { trySpend(id: string, cost: number, reason: string): { ok: boolean } } };
+  }).run.ledger;
+  assertEquals(ledger.trySpend("p1", 50, "door").ok, true);
+  assertEquals(h.runtime.hud()!.players[0].points, expectedTotal - 50);
+  assertEquals(h.runtime.hud()!.players[0].totalPoints, expectedTotal);
 });
 
 Deno.test("zombots: a downed human is revived by 20 paid presses", () => {
@@ -459,19 +511,6 @@ Deno.test("zombots: a rack arms from its own side only, then refills", async () 
   });
 });
 
-Deno.test("zombots: checkpoint run state lists purses, armed sets and zombies", () => {
-  const h = harness(OPEN_MAP);
-  h.join("p1");
-  h.steps(FIRST_WAVE_TICKS);
-  const cp = h.runtime.checkpointState()!;
-  assertEquals(cp.phase, "wave");
-  assertEquals(cp.wave, 1);
-  assertEquals(cp.humans, ["p1"]);
-  assertEquals(cp.purses, [{ id: "p1", points: ZOMBOTS_TUNING.points.start }]);
-  assertEquals(cp.armed, [{ id: "p1", weapons: [] }]);
-  assertEquals(cp.zombies, [...h.zombies]);
-});
-
 Deno.test("zombots: 10th zombot spawns smaller and twice as fast", () => {
   const spacedMap: DoorsMap = {
     ...OPEN_MAP,
@@ -493,6 +532,16 @@ Deno.test("zombots: 10th zombot spawns smaller and twice as fast", () => {
   assertEquals(h.zombies.size, 10);
 
   const z1 = h.players.get("bot:zombie-1")!;
+  const z7 = h.players.get("bot:zombie-grandpa-7")!;
+  assertEquals(z7.modelScale, 1);
+  assertEquals(
+    z7.moveSpeedScale,
+    ZOMBOTS_TUNING.zombie.baseSpeedScale * ZOMBOTS_TUNING.zombie.grandpaSpeedMultiplier,
+  );
+  assertEquals(
+    z7.maxHealth,
+    Math.round(ZOMBOTS_TUNING.zombie.baseHealth * ZOMBOTS_TUNING.zombie.grandpaHealthMultiplier),
+  );
   const z9 = h.players.get("bot:zombie-9")!;
   const z10 = h.players.get("bot:zombie-10")!;
   assertEquals(z1.modelScale, 1);

@@ -420,7 +420,6 @@ export class GameServer implements ReplayIntegrationSinkHandle {
       players: this.players,
       runtimeMatchId: () => this.runtimeMatchId,
       raidCheckpointState: () => this.getRaidCheckpointState(),
-      zombotsCheckpointState: () => this.zombotsRuntime?.checkpointState(),
       matchMetadata: (tick) => this.getMatchMetadata(tick),
       createReplayLifecycleClient: () =>
         this.authority.createReplayLifecycleClient?.() ?? null,
@@ -888,6 +887,10 @@ export class GameServer implements ReplayIntegrationSinkHandle {
    * Noop adapters never open replays.sqlite on the game host.
    */
   public startReplayRecorder(): ReplayRecorder | null {
+    // Replays are an arena feature. A zombots run does not record: its zombie
+    // spawns, window climbing, melee damage and stuck relocates are not in the
+    // authoritative event stream, so a replay would not match the live run.
+    if (this.isZombotsRuntime()) return null;
     return this.replay.startRecorder();
   }
 

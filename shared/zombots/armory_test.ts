@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import {
   WEAPON_ORDER,
   WEAPON_PISTOL,
@@ -9,6 +9,7 @@ import {
   Armory,
   gunRackCost,
   gunRackMags,
+  tryBuyFromRack,
   ZOMBOTS_RACK_WEAPON_ID,
   type ZombotsGunRack,
 } from "./armory.ts";
@@ -43,7 +44,7 @@ Deno.test("players start unarmed", () => {
 });
 
 Deno.test("exactly racks.reach is in reach and past it is refused", () => {
-  assertEquals(REACH, 2.2);
+  assert(REACH > 0);
   const armory = new Armory();
   armory.join("a");
   armory.join("b");
@@ -203,4 +204,65 @@ Deno.test("gun rack cost is 20 per mag for first take and missing spare mags on 
   assertEquals(gunRackCost(WEAPON_SHOTGUN, true, 5), 20);
   assertEquals(gunRackCost(WEAPON_SHOTGUN, true, 4), 40);
   assertEquals(gunRackCost(WEAPON_SHOTGUN, true, 0), 40);
+});
+
+// ── tryBuyFromRack: refusals never charge ───────────────────────────────────
+
+function buy(
+  armory: Armory,
+  over: Partial<Parameters<typeof tryBuyFromRack>[1]> = {},
+) {
+  const charged: number[] = [];
+  const result = tryBuyFromRack(armory, {
+    playerId: "a",
+    rack: rack("p", "pistol", { x: 0, z: 0 }),
+    eye: EYE,
+    isDowned: false,
+    spareClips: 0,
+    spareClipsFull: false,
+    trySpend: (cost) => {
+      charged.push(cost);
+      return { ok: true };
+    },
+    ...over,
+  });
+  return { result, charged };
+}
+
+Deno.test("tryBuyFromRack: a first take charges every mag and arms", () => {
+  const armory = new Armory();
+  armory.join("a");
+  const { result, charged } = buy(armory);
+  const mags = gunRackMags(WEAPON_PISTOL, false, 0);
+  assertEquals(charged, [mags * ZOMBOTS_TUNING.racks.gunCostPerMag]);
+  assert(result.kind === "ok" && result.firstTake);
+  assertEquals(armory.isArmed("a", WEAPON_PISTOL), true);
+});
+
+Deno.test("tryBuyFromRack: absent, downed, out of reach and full charge nothing", () => {
+  const armory = new Armory();
+  assertEquals(buy(armory).result, { kind: "refused", reason: "absent" });
+  armory.join("a");
+  for (
+    const [over, reason] of [
+      [{ isDowned: true }, "downed"],
+      [{ eye: { x: 99, z: 0 } }, "outOfReach"],
+    ] as const
+  ) {
+    const { result, charged } = buy(armory, over);
+    assertEquals(result, { kind: "refused", reason });
+    assertEquals(charged, []);
+  }
+  buy(armory); // arm the pistol
+  const full = buy(armory, { spareClips: 99, spareClipsFull: true });
+  assertEquals(full.result, { kind: "refused", reason: "full" });
+  assertEquals(full.charged, []);
+});
+
+Deno.test("tryBuyFromRack: a broke player is refused and is not armed", () => {
+  const armory = new Armory();
+  armory.join("a");
+  const { result } = buy(armory, { trySpend: () => ({ ok: false }) });
+  assertEquals(result, { kind: "refused", reason: "notEnough" });
+  assertEquals(armory.isArmed("a", WEAPON_PISTOL), false);
 });

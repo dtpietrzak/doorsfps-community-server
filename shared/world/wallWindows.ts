@@ -307,6 +307,37 @@ export function windowPartPassable(part: number, zombieClimb: boolean): boolean 
 }
 
 /**
+ * Window id whose opening holds this span (a pane from
+ * {@link collisionWallSpans}): the window on `wallId` nearest the span's
+ * midpoint, within half a window width. Null when none is.
+ */
+export function windowIdAtSpan(
+  wallId: string,
+  a: WindowVec2,
+  b: WindowVec2,
+  windows: readonly { id: string; wallId: string; center: WindowVec2 }[] | undefined,
+): string | null {
+  if (!windows) return null;
+  const mx = (a.x + b.x) / 2;
+  const mz = (a.z + b.z) / 2;
+  const limit = WINDOW_WIDTH / 2;
+  let best: string | null = null;
+  let bestD = limit * limit;
+  for (let i = 0; i < windows.length; i++) {
+    const w = windows[i]!;
+    if (w.wallId !== wallId) continue;
+    const dx = w.center.x - mx;
+    const dz = w.center.z - mz;
+    const d = dx * dx + dz * dz;
+    if (d <= bestD) {
+      best = w.id;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
+/**
  * Top-down pieces of a wall. The opening is a gap in the line.
  * Half and float walls are drawn whole.
  */

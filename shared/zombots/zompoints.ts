@@ -35,6 +35,7 @@ function pointsIntent(
  */
 export class ZompointsLedger {
   private readonly purses = new Map<ZombotsPlayerId, number>();
+  private readonly totals = new Map<ZombotsPlayerId, number>();
 
   /**
    * Seed `points.start`. A second join leaves the purse alone and returns
@@ -44,16 +45,23 @@ export class ZompointsLedger {
     if (this.purses.has(playerId)) return null;
     const start = ZOMBOTS_TUNING.points.start;
     this.purses.set(playerId, start);
+    this.totals.set(playerId, start);
     return pointsIntent(playerId, start, start, "start");
   }
 
   leave(playerId: ZombotsPlayerId): void {
     this.purses.delete(playerId);
+    this.totals.delete(playerId);
   }
 
   /** Current balance, or 0 when the player has no purse. */
   get(playerId: ZombotsPlayerId): number {
     return this.purses.get(playerId) ?? 0;
+  }
+
+  /** Total zompoints gathered in this run (start + all awards, never reduced by spends). */
+  total(playerId: ZombotsPlayerId): number {
+    return this.totals.get(playerId) ?? 0;
   }
 
   /**
@@ -62,6 +70,15 @@ export class ZompointsLedger {
    */
   award(playerId: ZombotsPlayerId, reason: ZompointsAwardReason): ZombotsPointsIntent {
     return this.credit(playerId, ZOMBOTS_TUNING.points[reason], reason);
+  }
+
+  /**
+   * Pay one hit on a zombie: `points.headHit` for a head-zone hit, `points.hit`
+   * otherwise. Both carry reason `hit`; the delta tells them apart.
+   */
+  awardHit(playerId: ZombotsPlayerId, head: boolean): ZombotsPointsIntent {
+    const points = ZOMBOTS_TUNING.points;
+    return this.credit(playerId, head ? points.headHit : points.hit, "hit");
   }
 
   /**
@@ -111,6 +128,9 @@ export class ZompointsLedger {
     if (current === undefined) return pointsIntent(playerId, 0, 0, reason);
     const points = current + delta;
     this.purses.set(playerId, points);
+    if (delta > 0) {
+      this.totals.set(playerId, (this.totals.get(playerId) ?? 0) + delta);
+    }
     return pointsIntent(playerId, points, delta, reason);
   }
 }

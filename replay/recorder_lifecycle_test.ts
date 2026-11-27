@@ -20,12 +20,14 @@ import {
   type InMemoryReplayLifecycleClient,
 } from "./ReplayRecorder.ts";
 import { isReplayRecordingEnabled } from "./recordingEnabled.ts";
+import { InMemoryReplayLifecycleClient as InMemoryReplayLifecycleClientImpl } from "./replayLifecycleClient.ts";
 import {
   settleRecorder,
   wireReplayRecorder,
   type WireRecorderOptions,
 } from "./replayTestHarness.ts";
 import { serverInternals, driveTick } from "../runtime/gameServerTestHarness.ts";
+import { loadMapFile } from "../world/loadMap.ts";
 
 const miniMap: DoorsMap = {
   name: "replay-lifecycle",
@@ -519,4 +521,42 @@ Deno.test("8.1/8.6 source-scan: only completeFinalizationAsync → lifecycle.fin
       `unexpected checkpoint import: ${imp}`,
     );
   }
+});
+
+Deno.test("zombots: no replay recorder even with a lifecycle client; arenas still record", async () => {
+  // A Noop adapter that can open replays, like the HTTP one on official hosts.
+  const lifecycleAdapter = () => {
+    const adapter = new NoopAuthorityAdapter() as unknown as {
+      createReplayLifecycleClient: () => InMemoryReplayLifecycleClientImpl;
+    };
+    adapter.createReplayLifecycleClient = () => new InMemoryReplayLifecycleClientImpl();
+    return adapter as unknown as NoopAuthorityAdapter;
+  };
+  const zombotsMap = await loadMapFile(
+    new URL("../maps/zombots/Zombots-01.doors.json", import.meta.url).pathname,
+  );
+  const build = (modeId?: string) => {
+    const map = modeId ? zombotsMap : miniMap;
+    return new GameServer({
+      name: "replay-mode-gate",
+      port: 0,
+      host: "127.0.0.1",
+      map,
+      collision: new MapCollision(map),
+      autofillBots: 0,
+      noBotsOnEmptyServer: true,
+      joinMode: "open",
+      rankedServerId: modeId ?? "open",
+      ...(modeId ? { modeId } : {}),
+      authorityAdapter: lifecycleAdapter(),
+      botThinkEngine: null,
+    });
+  };
+  const arena = build();
+  assertExists(arena.startReplayRecorder());
+  arena.stopReplayRecorder();
+
+  const zombots = build("zombots");
+  assertEquals(zombots.startReplayRecorder(), null);
+  assertEquals(zombots.getReplayRecorder(), null);
 });

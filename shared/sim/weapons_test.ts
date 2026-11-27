@@ -61,10 +61,11 @@ Deno.test("damageFalloffMult: degenerate ramp snaps to the floor", () => {
 });
 
 Deno.test("shotBaseDamage: pistol body/head at range", () => {
-  assertEquals(shotBaseDamage(PISTOL, false, 5), 30);
-  assertEquals(shotBaseDamage(PISTOL, true, 5), 55);
-  assertAlmostEquals(shotBaseDamage(PISTOL, false, 60), 13.5);
-  assertAlmostEquals(shotBaseDamage(PISTOL, true, 60), 24.75);
+  const floor = PISTOL.falloff!.minMult;
+  assertEquals(shotBaseDamage(PISTOL, false, 5), PISTOL.bodyDamage);
+  assertEquals(shotBaseDamage(PISTOL, true, 5), PISTOL.headDamage);
+  assertAlmostEquals(shotBaseDamage(PISTOL, false, 60), PISTOL.bodyDamage * floor);
+  assertAlmostEquals(shotBaseDamage(PISTOL, true, 60), PISTOL.headDamage * floor);
   assertEquals(shotBaseDamage(RIFLE, true, 800), RIFLE.headDamage);
 });
 
@@ -95,7 +96,7 @@ Deno.test("shotgun PR8: crosshair mult grows from cone + still", () => {
   assertEquals(crosshairSpreadMultFromDeg(WEAPON_SHOTGUN, 1.2), 1);
   assertAlmostEquals(
     crosshairSpreadMultFromDeg(WEAPON_SHOTGUN, 2.2),
-    (5.625 + 2.2 + 1) / (5.625 + 1.2 + 1),
+    (SHOTGUN.pelletSpreadDeg! + 2.2 + 1) / (SHOTGUN.pelletSpreadDeg! + 1.2 + 1),
   );
   assertEquals(crosshairSpreadMultFromDeg(WEAPON_SHOTGUN, 0), 1);
   assertEquals(crosshairSpreadMultFromDeg(WEAPON_RIFLE, 0), 1);
@@ -107,7 +108,7 @@ Deno.test("pistol-whip stats live on PISTOL.melee (aliases unchanged)", () => {
   const m = PISTOL.melee!;
   assertEquals(m, {
     baseDamage: 50,
-    range: 2.8,
+    range: 2.4,
     cooldownMs: 700,
     swingMs: 450,
     hitMomentT: 0.45,

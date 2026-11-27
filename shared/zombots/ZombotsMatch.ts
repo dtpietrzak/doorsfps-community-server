@@ -56,6 +56,9 @@ export type ZombotsMatchTuning = {
     readonly miniEvery: number;
     readonly miniModelScale: number;
     readonly miniSpeedMultiplier: number;
+    readonly grandpaEvery: number;
+    readonly grandpaSpeedMultiplier: number;
+    readonly grandpaHealthMultiplier: number;
   };
 };
 
@@ -412,18 +415,27 @@ export class ZombotsMatch {
     this.spawnSeq += 1;
     const miniEvery = this.tuning.zombie.miniEvery;
     const isMini = miniEvery > 0 && this.spawnSeq % miniEvery === 0;
+    const grandpaEvery = this.tuning.zombie.grandpaEvery;
+    const isGrandpa = !isMini && grandpaEvery > 0 &&
+      this.spawnSeq % grandpaEvery === 0;
     const speedScale = isMini
       ? plan.speedScale * this.tuning.zombie.miniSpeedMultiplier
+      : isGrandpa
+      ? plan.speedScale * this.tuning.zombie.grandpaSpeedMultiplier
       : plan.speedScale;
+    const health = isGrandpa
+      ? round(plan.health * this.tuning.zombie.grandpaHealthMultiplier)
+      : plan.health;
     const modelScale = isMini ? this.tuning.zombie.miniModelScale : 1;
     intents.push({
       kind: "spawnZombie",
       wave: this.waveValue,
       spawnId: spawn.id,
       p: { x: spawn.p.x, z: spawn.p.z },
-      health: plan.health,
+      health,
       speedScale,
       modelScale,
+      grandpa: isGrandpa,
       meleeDamage: plan.meleeDamage,
     });
     return true;

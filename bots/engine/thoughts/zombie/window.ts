@@ -40,6 +40,11 @@ type Vec2 = { x: number; z: number };
 /** The collision queries the grid needs (the engine MapCollision fits). */
 export type ZombieNavCollision = {
   hasHeadroom(x: number, z: number): boolean;
+  /**
+   * Windows into closures no opened door reaches yet (the engine
+   * MapCollision's rule). Absent = none sealed.
+   */
+  sealedZombieWindowIds?(): readonly string[];
 };
 
 /** One window a zombie may climb, with its zombie-side normal. */
@@ -84,6 +89,11 @@ export type ZombieWindowNav = {
   doorCells: readonly { doorId: string; cells: readonly number[] }[];
   /** Open doors already turned to floor. */
   openDoors: string[];
+  /**
+   * Windows zombies can't use yet: their player closure isn't unlocked, so
+   * the collision treats them as wall. Only ever shrinks as doors open.
+   */
+  sealedWindows: string[];
   /** Chase fields and their goal cells. Dropped whenever a door opens. */
   chaseCells: number[];
   chaseFields: number[][];
@@ -438,9 +448,17 @@ export function buildZombieWindowNav(
       room === phases[0] || room === phases[1] || room === phases[2],
     doorCells,
     openDoors: [],
+    sealedWindows: sealedOf(collision),
     chaseCells: [],
     chaseFields: [],
   };
+}
+
+function sealedOf(collision: ZombieNavCollision): string[] {
+  const ids = collision.sealedZombieWindowIds?.() ?? [];
+  const out: string[] = [];
+  for (let i = 0; i < ids.length; i++) out.push(ids[i]!);
+  return out;
 }
 
 /**
@@ -467,6 +485,8 @@ export function openZombieNavDoors(
     }
     nav.chaseCells.length = 0;
     nav.chaseFields.length = 0;
+    // A door can join a new closure to phase 1 and unseal its windows.
+    nav.sealedWindows = sealedOf(collision);
   }
 }
 
@@ -561,6 +581,8 @@ function bestPortal(
   for (let i = 0; i < nav.portals.length; i++) {
     const p = nav.portals[i]!;
     if (p.zombieRoom !== room) continue;
+    // Never into a closure the players haven't opened: it's a dead end.
+    if (nav.sealedWindows.indexOf(p.windowId) >= 0) continue;
     const c = routeCost(nav, p, self, goal, goalField);
     if (c < 0) continue;
     if (index < 0 || c < cost) {
@@ -620,6 +642,9 @@ export function zombieWindowPlan(
   // Mid-window (on the wall band) the room is unknown: keep the latch.
   if (room !== null) {
     if (latched !== null && latched.zombieRoom !== room) portal = null;
+    if (portal !== null && nav.sealedWindows.indexOf(portal.windowId) >= 0) {
+      portal = null;
+    }
     // Windows the goal can be walked to from (through opened doors) win;
     // if there are none, the nearest by straight line.
     let goalField = goal === null ? null : chaseField(nav, goal);

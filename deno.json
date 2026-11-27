@@ -3,6 +3,7 @@
     "dev": "deno run -A --unstable-net --node-modules-dir=manual main.ts",
     "start": "deno run -A --unstable-net --node-modules-dir=manual main.ts",
     "compile": "deno compile -A --unstable-net --node-modules-dir=manual --output dist/doors-server main.ts && deno task package",
+    "compile:host": "deno compile -A --no-check --unstable-net --node-modules-dir=manual --output dist/doors-server main.ts && deno task package",
     "compile:mac": "deno compile -A --unstable-net --node-modules-dir=manual --target aarch64-apple-darwin --output dist/doors-server-mac-arm64 main.ts",
     "compile:mac-x64": "deno compile -A --unstable-net --node-modules-dir=manual --target x86_64-apple-darwin --output dist/doors-server-mac-x64 main.ts",
     "compile:win": "deno compile -A --unstable-net --node-modules-dir=manual --target x86_64-pc-windows-msvc --output dist/doors-server-win.exe main.ts",

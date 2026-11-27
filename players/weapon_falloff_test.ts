@@ -94,8 +94,11 @@ Deno.test("pistol: far head hit lands at the falloff floor, never 0", () => {
   const outcome = shoot(TICK);
   assertExists(outcome?.damages);
   assertEquals(outcome.shot.hitZone, "head");
-  // 55 × 0.45 = 24.75 → rounds to 25, neutral roll +0.
-  assertEquals(outcome.damages[0]!.damage, 25);
+  // headDamage × minMult, rounded, neutral roll +0.
+  assertEquals(
+    outcome.damages[0]!.damage,
+    Math.round(PISTOL.headDamage * PISTOL.falloff!.minMult),
+  );
   assertEquals(log.length, 3);
 });
 

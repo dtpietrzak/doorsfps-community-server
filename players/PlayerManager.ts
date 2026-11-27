@@ -3678,6 +3678,10 @@ export class PlayerManager {
         ? this.clipObstaclesExcept(player.id)
         : [];
       player.update(this.collision, tick, obstacles);
+      // Zombots humans go down for good on death, and every human spawns on
+      // one tight pad where two bodies can resolve to the same corner point.
+      // Overlap there is not fatal; they walk apart.
+      if (player.downOnDeath) continue;
       if (player.lastOverlapOof && player.dieFromOverlap(tick, nowMs)) {
         player.deaths += 1;
         deaths.push(this.overlapDeathPacket(player));

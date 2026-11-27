@@ -48,25 +48,10 @@ Deno.test("zombots checkpoint: rules, player state and open doors round-trip", a
   live.getCollision().openSlidingDoor(DOOR);
   live.drainAuthoritativeEvents();
 
-  const run = {
-    phase: "wave" as const,
-    wave: 3,
-    zombiesLeft: 9,
-    msUntilNextWave: 0,
-    humans: ["p1", "p2"],
-    downed: ["p2"],
-    purses: [{ id: "p1", points: 750 }, { id: "p2", points: 120 }],
-    revives: [],
-    armed: [{ id: "p1", weapons: [WEAPON_PISTOL] }, { id: "p2", weapons: [] }],
-    zombies: ["bot:zombie-1"],
-  };
-  const cp = viaJson(captureCheckpointState(live, 1, "match-1", { active: false }, {
-    zombotsRun: run,
-  }));
+  const cp = viaJson(captureCheckpointState(live, 1, "match-1", { active: false }));
   assertExists(cp.match.zombots);
   assertEquals(cp.match.zombots.rules, ZOMBOTS_SIM_RULES);
   assertEquals(cp.match.zombots.openDoorIds, [DOOR]);
-  assertEquals(cp.match.zombots.run, run);
   const p2 = cp.players.find((p) => p.id === "p2")!;
   assertEquals(p2.zombots?.downed, true);
 
@@ -79,7 +64,7 @@ Deno.test("zombots checkpoint: rules, player state and open doors round-trip", a
   assertEquals(rebuilt.get("p1")!.isWeaponArmed(WEAPON_RIFLE), false);
   assertEquals(rebuilt.isDowned("p2"), true);
   assertEquals(rebuilt.get("bot:zombie-1")!.meleeDamageOverride, 25);
-  // A second capture of the rebuilt sim matches, minus the runtime block.
+  // A second capture of the rebuilt sim matches.
   const again = viaJson(captureCheckpointState(rebuilt, 1, "match-1"));
   assertEquals(again.players, cp.players);
   assertEquals(again.match.zombots?.openDoorIds, [DOOR]);

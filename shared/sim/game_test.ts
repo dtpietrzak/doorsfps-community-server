@@ -156,9 +156,9 @@ Deno.test("damage varies by ±5 points with +5 reserved for the top 10%", () => 
   });
 });
 
-Deno.test("rifle headshots range from 100 through 110", () => {
-  assertEquals(rollDamageVariation(RIFLE.headDamage, 0).damage, 100);
-  assertEquals(rollDamageVariation(RIFLE.headDamage, 1).damage, 110);
+Deno.test("rifle headshots range headDamage ±5", () => {
+  assertEquals(rollDamageVariation(RIFLE.headDamage, 0).damage, RIFLE.headDamage - 5);
+  assertEquals(rollDamageVariation(RIFLE.headDamage, 1).damage, RIFLE.headDamage + 5);
 });
 
 Deno.test("rollDamageVariation clamps non-finite and out-of-range samples", () => {

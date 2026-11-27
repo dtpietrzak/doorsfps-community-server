@@ -136,6 +136,23 @@ Deno.test("center inside a body in a tight corridor oofs the mover", () => {
   assertEquals(deaths[0]?.killerId, "a");
 });
 
+Deno.test("zombots: a human stuck inside a teammate is never downed by the overlap failsafe", () => {
+  // Zombots puts every human on one tight pad, and a death there is a
+  // permanent down. Same corridor stack as above, zombots rules on.
+  const pm = new PlayerManager(new MapCollision(corridorMap), {
+    zombots: { armedWeapons: true, downedState: true, teammatesPassThrough: true },
+  });
+  const a = pm.add("a", "Stuck", "A");
+  const b = pm.add("b", "Mate", "A");
+  place(a, 0, 0);
+  place(b, 0, 0);
+  const deaths = pm.update(SPAWN_INVULN_TICKS + 10);
+  assertEquals(deaths.length, 0);
+  assertEquals(a.alive, true);
+  assertEquals(a.downed, false);
+  assertEquals(b.alive, true);
+});
+
 Deno.test("spawn-protected player still oofs when stuck inside", () => {
   const pm = new PlayerManager(new MapCollision(corridorMap));
   const a = pm.add("a", "Fresh", "A");

@@ -117,6 +117,11 @@ export class Armory {
     this.armed.delete(playerId);
   }
 
+  /** True once the player has joined (and until they leave). */
+  has(playerId: ZombotsPlayerId): boolean {
+    return this.armed.has(playerId);
+  }
+
   isArmed(playerId: ZombotsPlayerId, weaponId: number): boolean {
     return this.armed.get(playerId)?.has(weaponId) ?? false;
   }
@@ -157,4 +162,49 @@ export class Armory {
       intent: { kind: "weaponTaken", playerId, rackId: rack.id, weapon: rack.weapon },
     };
   }
+}
+
+export type RackBuyRefusal = RackTakeRefusal | "full" | "notEnough";
+
+export type RackBuyResult =
+  | { kind: "refused"; reason: RackBuyRefusal }
+  | (Extract<RackTakeResult, { kind: "ok" }> & { cost: number });
+
+export type RackBuyInput = {
+  playerId: ZombotsPlayerId;
+  rack: ZombotsGunRack;
+  eye: { x: number; z: number };
+  isDowned: boolean;
+  /** Spare mags the player holds for this rack's gun now (0 when unarmed). */
+  spareClips: number;
+  /** True when those spare mags are already full. */
+  spareClipsFull: boolean;
+  /** Debit the purse. Called at most once, after every other check passes. */
+  trySpend: (cost: number) => { ok: boolean };
+};
+
+/**
+ * Buy from a gun rack (notes/zombots.md "Gun rack cost and full-ammo
+ * refusal"): a first take buys every mag, a refill buys the missing spare
+ * mags at {@link ZOMBOTS_TUNING.racks.gunCostPerMag} each. Refusals in order:
+ * absent, downed, out of reach, full (already armed with full spares), not
+ * enough points. Nothing is debited and nothing is armed on a refusal; the
+ * glue sends a `rackRefused` feed event only for "full".
+ */
+export function tryBuyFromRack(armory: Armory, input: RackBuyInput): RackBuyResult {
+  const { playerId, rack, eye, isDowned } = input;
+  if (!armory.has(playerId)) return { kind: "refused", reason: "absent" };
+  if (isDowned) return { kind: "refused", reason: "downed" };
+  if (!withinRackReach(rack.center, eye)) return { kind: "refused", reason: "outOfReach" };
+  const weaponId = ZOMBOTS_RACK_WEAPON_ID[rack.weapon];
+  const armed = armory.isArmed(playerId, weaponId);
+  const cost = gunRackCost(weaponId, armed, input.spareClips);
+  if ((armed && input.spareClipsFull) || cost <= 0) {
+    return { kind: "refused", reason: "full" };
+  }
+  if (!input.trySpend(cost).ok) return { kind: "refused", reason: "notEnough" };
+  const taken = armory.tryTakeFromRack(playerId, rack, eye, isDowned);
+  // Unreachable after the checks above; kept so a refusal can never arm.
+  if (taken.kind !== "ok") return taken;
+  return { ...taken, cost };
 }

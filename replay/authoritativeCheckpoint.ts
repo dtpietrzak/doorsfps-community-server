@@ -74,32 +74,6 @@ export type CheckpointRaidState =
 export type CheckpointZombotsPlayerState = ReturnType<Player["zombotsState"]>;
 
 /**
- * Zombots rules objects at the checkpoint (notes/zombots.md step 14), read
- * from the live runtime. Replay rebuilds have no runtime and omit it; the
- * sim-relevant part (rules flag, doors, per-player state) is outside it.
- */
-export type CheckpointZombotsRunState = {
-  readonly phase: "waiting" | "intermission" | "wave" | "over";
-  readonly wave: number;
-  readonly zombiesLeft: number;
-  readonly msUntilNextWave: number;
-  /** Humans in the run, join order. */
-  readonly humans: readonly string[];
-  readonly downed: readonly string[];
-  readonly purses: readonly { readonly id: string; readonly points: number }[];
-  readonly revives: readonly {
-    readonly reviverId: string;
-    readonly targetId: string;
-    readonly presses: number;
-  }[];
-  readonly armed: readonly { readonly id: string; readonly weapons: readonly number[] }[];
-  /** Charges paid toward doors still shut, map order. */
-  readonly doorPaid?: readonly { readonly doorId: string; readonly paid: number }[];
-  /** Zombie bot ids alive at the checkpoint, spawn order. */
-  readonly zombies: readonly string[];
-};
-
-/**
  * Zombots match block. Absent in every other mode, so their checkpoints
  * keep their shape. Restore opens each door with `openSlidingDoor`; the
  * result does not depend on order.
@@ -108,7 +82,6 @@ export type CheckpointZombotsState = {
   readonly rules: Readonly<ZombotsSimRules>;
   /** Doors opened this run. Doors never close within a run. */
   readonly openDoorIds: readonly string[];
-  readonly run?: CheckpointZombotsRunState;
 };
 
 export type CheckpointMatchState = {
@@ -384,8 +357,6 @@ export function captureCheckpointState(
      * are recorded at `appliedTick <= captureTick`, which playback skips.
      */
     readonly allowPendingEvents?: boolean;
-    /** Zombots rules objects from the live runtime (step 14). */
-    readonly zombotsRun?: CheckpointZombotsRunState;
   },
 ): AuthoritativeCheckpoint {
   if (typeof runtimeMatchId !== "string" || runtimeMatchId.length === 0) {
@@ -411,7 +382,6 @@ export function captureCheckpointState(
     ? {
       rules: { ...zombotsRules },
       openDoorIds: [...collision.openSlidingDoorIds()],
-      ...(opts?.zombotsRun ? { run: opts.zombotsRun } : {}),
     }
     : null;
 

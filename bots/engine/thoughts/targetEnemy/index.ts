@@ -46,7 +46,7 @@ import { applyTargetEnemyPatch, type BotBrainState } from "../../types.ts";
 import type { Player } from "../../players/Player.ts";
 import { YAW_PLAYER_FOV_HALF_ANGLE } from "../../../../shared/world/wallCorners.ts";
 import type { AfterTargetDecision, NavDecision } from "../helpers/types.ts";
-import { distance2 } from "../../math/index.ts";
+import { distance2, max, min } from "../../math/index.ts";
 
 export type TargetEnemyStepOpts = {
   targetEnemyStandGroundChance: number;
@@ -161,14 +161,14 @@ export function runTargetEnemyStep(
       const directiveFightBias = !me.isAgent &&
         (directive === "defend" || directive === "slay");
       const baseDoorAgg = directiveFightBias
-        ? Math.min(doorAggression, 0.2)
+        ? min(doorAggression, 0.2)
         : doorAggression;
       const baseStandGround = mobilityBlocksStill
         ? 0
         : campPlanted || me.isAgent
         ? 1
         : directiveFightBias
-        ? Math.max(targetEnemyStandGroundChance, 0.65)
+        ? max(targetEnemyStandGroundChance, 0.65)
         : targetEnemyStandGroundChance;
       const biased = ctx.hooks.combatBias(me, ctx.view, {
         doorAggression: baseDoorAgg,

@@ -15,10 +15,11 @@
  */
 
 import { MOVE_PLAYER_RADIUS } from "../sim/moveStep.ts";
-import { distance2, round } from "../math/index.ts";
+import { distance2, min, round } from "../math/index.ts";
 import {
   type ZombotsDoorMap,
   ZOMBOTS_ROOM_CELL,
+  type ZombotsRoomGraph,
   ZOMBOTS_ROOM_WALL_HALF_THICK,
   type ZombotsRoomStats,
   zombotsRoomRaster,
@@ -72,6 +73,8 @@ export type ZombotsLayout = {
   zombieRooms: readonly ZombotsZombieRoom[];
   /** Every window between a zombie closure and a player closure, in map order. */
   windowLinks: readonly ZombotsWindowLink[];
+  /** Door → the two rooms it joins, in map door order (from the room split). */
+  doorRooms: ZombotsRoomGraph["doorRooms"];
   /** One entry per gun rack, in map order. */
   rackPhase: readonly ZombotsRackPlacement[];
   /** Room ids too small to count as closures (see {@link ZOMBOTS_LAYOUT_MIN_ROOM_AREA}). */
@@ -377,6 +380,7 @@ export function zombotsLayout(map: ZombotsLayoutMap): ZombotsLayout {
     phases,
     zombieRooms,
     windowLinks,
+    doorRooms: graph.doorRooms,
     rackPhase,
     slivers,
     rooms,
@@ -385,6 +389,55 @@ export function zombotsLayout(map: ZombotsLayoutMap): ZombotsLayout {
     errors,
     warnings,
   };
+}
+
+/**
+ * Door id → the two phases it joins, low first. Only doors on the phase
+ * chain are listed; empty when the layout has no valid chain.
+ */
+export function zombotsDoorPhases(
+  layout: Pick<ZombotsLayout, "phases" | "doorRooms">,
+): Map<string, readonly [number, number]> {
+  const out = new Map<string, readonly [number, number]>();
+  const phases = layout.phases;
+  if (!phases) return out;
+  const phaseOfRoom = new Map<number, number>();
+  for (let i = 0; i < phases.length; i++) phaseOfRoom.set(phases[i]!, i + 1);
+  for (const door of layout.doorRooms) {
+    if (!door.rooms) continue;
+    const a = phaseOfRoom.get(door.rooms[0]);
+    const b = phaseOfRoom.get(door.rooms[1]);
+    if (a === undefined || b === undefined) continue;
+    out.set(door.doorId, a < b ? [a, b] : [b, a]);
+  }
+  return out;
+}
+
+/**
+ * Phases the players can reach: 1, then one more for each opened door on the
+ * chain. A door only counts once the phase before it is reachable, so a door
+ * bought out of order (if a map allows it) unlocks nothing yet. Without a
+ * valid chain, each open door counts as one phase, up to 3.
+ */
+export function zombotsUnlockedPhases(
+  layout: Pick<ZombotsLayout, "phases">,
+  doorPhases: ReadonlyMap<string, readonly [number, number]>,
+  openDoorIds: readonly string[],
+): number {
+  if (!layout.phases) return min(3, 1 + openDoorIds.length);
+  let unlocked = 1;
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const id of openDoorIds) {
+      const pair = doorPhases.get(id);
+      if (pair && pair[0] <= unlocked && pair[1] > unlocked) {
+        unlocked = pair[1];
+        grew = true;
+      }
+    }
+  }
+  return unlocked;
 }
 
 /**
@@ -402,6 +455,45 @@ export function zombotsSpawnGate(
     if (open) for (const id of z.spawnIds) live.add(id);
   }
   return (spawnId) => live.has(spawnId);
+}
+
+/**
+ * Windows a zombie may not use yet: every window into a player closure the
+ * players haven't opened a door to. Phase 1 is always open; another closure
+ * opens once a bought door chain joins it to phase 1. Zombies meet these
+ * windows as solid wall (no walk, jump or crawl through) and their nav skips
+ * them, so a zombie never lands in a room no human can reach. Shots and
+ * sight still pass. Empty when the layout has no valid phase chain.
+ */
+export function zombotsSealedWindowIds(
+  layout: Pick<ZombotsLayout, "phases" | "doorRooms" | "windowLinks">,
+  isOpen: (doorId: string) => boolean,
+): string[] {
+  const phases = layout.phases;
+  if (phases === null) return [];
+  const reached: number[] = [phases[0]];
+  // Few doors per map, so relaxing until stable is plenty.
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (let i = 0; i < layout.doorRooms.length; i++) {
+      const door = layout.doorRooms[i]!;
+      if (!door.rooms || !isOpen(door.doorId)) continue;
+      const hasA = reached.indexOf(door.rooms[0]) >= 0;
+      const hasB = reached.indexOf(door.rooms[1]) >= 0;
+      if (hasA === hasB) continue;
+      reached.push(hasA ? door.rooms[1] : door.rooms[0]);
+      grew = true;
+    }
+  }
+  const out: string[] = [];
+  for (let i = 0; i < layout.windowLinks.length; i++) {
+    const link = layout.windowLinks[i]!;
+    if (reached.indexOf(link.playerRoom) < 0 && out.indexOf(link.windowId) < 0) {
+      out.push(link.windowId);
+    }
+  }
+  return out;
 }
 
 /** Point on the wall line and its unit normal, or null off a full wall. */
