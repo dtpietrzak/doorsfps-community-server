@@ -196,6 +196,7 @@ Deno.test("first intermission starts the wave on time and spaces spawns", () => 
     speedScale: plan.speedScale,
     modelScale: 1,
     grandpa: false,
+    tall: false,
     meleeDamage: plan.meleeDamage,
   });
   assertEquals(started.length, 2);
@@ -293,6 +294,7 @@ Deno.test("round-robin skips spawns the gate closes", () => {
     speedScale: zombotsWavePlan(1, 1, tuning).speedScale,
     modelScale: 1,
     grandpa: false,
+    tall: false,
     meleeDamage: zombotsWavePlan(1, 1, tuning).meleeDamage,
   });
   // One draw for the wave, not one draw per zombie.
@@ -503,6 +505,7 @@ Deno.test("spawn intents carry the stepped health, speed and damage", () => {
     speedScale: wave1.speedScale,
     modelScale: 1,
     grandpa: false,
+    tall: false,
     meleeDamage: wave1.meleeDamage,
   });
 
@@ -533,6 +536,7 @@ Deno.test("spawn intents carry the stepped health, speed and damage", () => {
     speedScale: wave2.speedScale,
     modelScale: 1,
     grandpa: false,
+    tall: false,
     meleeDamage: wave2.meleeDamage,
   });
 });
@@ -768,6 +772,7 @@ Deno.test("every 10th zombot across waves is a smaller double-speed mini", () =>
     const plan = zombotsWavePlan(intent.wave, 1, tuning);
     const isMini = seq % 10 === 0;
     const isGrandpa = !isMini && seq % 7 === 0;
+    const isTall = !isMini && !isGrandpa && seq % 17 === 0;
     assertEquals(
       intent.modelScale,
       isMini ? ZOMBOTS_TUNING.zombie.miniModelScale : 1,
@@ -779,10 +784,13 @@ Deno.test("every 10th zombot across waves is a smaller double-speed mini", () =>
         ? plan.speedScale * ZOMBOTS_TUNING.zombie.miniSpeedMultiplier
         : isGrandpa
         ? plan.speedScale * ZOMBOTS_TUNING.zombie.grandpaSpeedMultiplier
+        : isTall
+        ? plan.speedScale * ZOMBOTS_TUNING.zombie.tallWalkSpeedMultiplier
         : plan.speedScale,
       `zombot ${seq} speedScale`,
     );
     assertEquals(intent.grandpa, isGrandpa, `zombot ${seq} grandpa`);
+    assertEquals(intent.tall, isTall, `zombot ${seq} tall`);
     assertEquals(
       intent.health,
       isGrandpa

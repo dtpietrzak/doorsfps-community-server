@@ -75,6 +75,7 @@
  */
 
 import type { ReplayRenderFeedState } from "./replayStateAccess.ts";
+import { HALF_PI } from "../shared/math/index.ts";
 
 // ---------------------------------------------------------------------------
 // Pose
@@ -155,7 +156,7 @@ export const FREE_CAMERA_FOV_MIN = 30;
 export const FREE_CAMERA_FOV_MAX = 110;
 export const FREE_CAMERA_FOV_STEP = 5;
 /** Pointer-lock look bound used by ReplayDevFpsPlayer free-fly. */
-export const FREE_CAMERA_PITCH_LIMIT = Math.PI / 2 - 0.01;
+export const FREE_CAMERA_PITCH_LIMIT = HALF_PI - 0.01;
 
 // ---------------------------------------------------------------------------
 // Errors

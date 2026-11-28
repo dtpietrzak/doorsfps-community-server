@@ -67,6 +67,10 @@ export const REPLAY_SIMULATION_VERSIONS:
       role: "previous",
     }),
     Object.freeze({
+      version: 2,
+      role: "previous",
+    }),
+    Object.freeze({
       version: SIMULATION_VERSION,
       role: "current",
     }),

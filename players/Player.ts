@@ -110,6 +110,10 @@ import {
 import { playerLandingHitAmount } from "../shared/sim/playerHitVolumes.ts";
 import { wishMoveYaw, yawFromWorldDir } from "../shared/world/yawPole.ts";
 import {
+  isTallZombotId,
+  tallZombotSpeedFactor,
+} from "../shared/zombots/tallZombot.ts";
+import {
   cloneWindowCrawlState,
   stepWindowCrawl,
   tryStartWindowCrawl,
@@ -117,6 +121,7 @@ import {
   type WindowCrawlState,
   type WindowCrawlVariant,
 } from "../shared/zombots/windowCrawl.ts";
+import { PI, TWO_PI } from "../shared/math/index.ts";
 
 // Re-export mobility contract so tests / callers can import from Player.ts.
 export {
@@ -201,8 +206,8 @@ function meleeCooldownTicksOf(melee: WeaponMelee | undefined): number | null {
 /** Smallest absolute angle between two yaws in radians. */
 function angleDelta(a: number, b: number): number {
   let d = a - b;
-  while (d > Math.PI) d -= Math.PI * 2;
-  while (d < -Math.PI) d += Math.PI * 2;
+  while (d > PI) d -= TWO_PI;
+  while (d < -PI) d += TWO_PI;
   return Math.abs(d);
 }
 
@@ -300,8 +305,8 @@ type PoseAt = {
 
 function lerpAngle(a: number, b: number, t: number): number {
   let d = b - a;
-  while (d > Math.PI) d -= Math.PI * 2;
-  while (d < -Math.PI) d += Math.PI * 2;
+  while (d > PI) d -= TWO_PI;
+  while (d < -PI) d += TWO_PI;
   return a + d * t;
 }
 
@@ -1644,7 +1649,7 @@ export class Player {
       // score / kills / deaths: event-driven (Score, CombatBurst) — omit here.
       // ping: 2 Hz only (every half-second at 60 Hz). Pool pawns carry a fake
       // pingMs so they appear on the TAB board like humans.
-      if (tick % Math.max(1, Math.floor(TICK_HZ / 2)) === 0) {
+      if (tick % Math.max(1, Math.floor(TICK_HZ * 0.5)) === 0) {
         if (this.pingMs > 0) {
           base.ping = Math.round(this.pingMs);
         }
@@ -2459,7 +2464,7 @@ export class Player {
   public fireCooldownTicksAt(tick: number): number {
     const w = this.weapon;
     if (!this.isAbilityActive("rapidFire", tick)) return w.fireCooldownTicks;
-    return Math.max(1, msToTicks(w.fireCooldownMs / 2));
+    return Math.max(1, msToTicks(w.fireCooldownMs * 0.5));
   }
 
   /**
@@ -2470,7 +2475,7 @@ export class Player {
   public reloadTicksAt(tick: number): number {
     const w = this.weapon;
     if (!this.isAbilityActive("rapidFire", tick)) return w.reloadTicks;
-    return Math.max(1, msToTicks(w.reloadMs / 2));
+    return Math.max(1, msToTicks(w.reloadMs * 0.5));
   }
 
   /**
@@ -2479,7 +2484,7 @@ export class Player {
    */
   private shellTicksAt(ms: number, tick: number): number {
     if (!this.isAbilityActive("rapidFire", tick)) return msToTicks(ms);
-    return Math.max(1, msToTicks(ms / 2));
+    return Math.max(1, msToTicks(ms * 0.5));
   }
 
   /**
@@ -3471,6 +3476,11 @@ export class Player {
       prevInputCrouch: this.prevInputCrouch,
     };
 
+    // Tall zombot pace cycle: 0.85x walk → 1s burst at 1.75x → 0.75s full stop.
+    const tallPace = isTallZombotId(this.id)
+      ? tallZombotSpeedFactor(Math.max(0, tick - this.spawnedAtTick) * DT * 1000)
+      : 1;
+
     // Zombots hardcoded window crawl: when a zombie walks up to a window and
     // pushes toward it, switch into window crawl (one of 3 animations) and
     // land back in normal standing locomotion on the inside.
@@ -3478,6 +3488,7 @@ export class Player {
       this.climbsWindows &&
       this.windowCrawl === null &&
       this.onGround &&
+      tallPace > 0 &&
       moveInput !== null
     ) {
       const portals = collision.windowCrawlPortals();
@@ -3502,12 +3513,13 @@ export class Player {
           mx += cos;
           mz -= sin;
         }
-        const len = Math.hypot(mx, mz);
+        const len = Math.sqrt(mx * mx + mz * mz);
         if (len > 1e-6) {
+          const invLen = 1 / len;
           const started = tryStartWindowCrawl(
             portals,
             { x: this.x, z: this.z },
-            { x: mx / len, z: mz / len },
+            { x: mx * invLen, z: mz * invLen },
             this.id,
             tick,
           );
@@ -3556,6 +3568,7 @@ export class Player {
           dt: DT,
           weaponMoveMult: this.weapon.moveSpeedMult,
           moveSpeedScale: this.moveSpeedScale *
+            tallPace *
             hitSlowMoveSpeedScale(this.activeHitSlowStacks(tick)),
           stallStaminaSpend,
         },

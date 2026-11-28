@@ -13,7 +13,7 @@
  * plant. Personality plant deconflict only runs on full replans.
  */
 
-import { isAtDoorCampPlant } from "../helpers/doorCamp.ts";
+import { isAtDoorCampPlant, lipCampSecForPush } from "../helpers/doorCamp.ts";
 import {
   type HuntBrainState,
   type NavGoalDecision,
@@ -26,7 +26,11 @@ import type {
   ThinkContext,
   ThinkStep,
 } from "../../pipeline/types.ts";
-import { hasDoorCampPlant, type BotBrainState } from "../../types.ts";
+import {
+  capturePush,
+  hasDoorCampPlant,
+  type BotBrainState,
+} from "../../types.ts";
 import type { YawPolePoint } from "../helpers/navLayers.ts";
 
 export type NavGoalStepOpts = {
@@ -182,6 +186,7 @@ export function runNavGoalStep(
         doorChangeTick: ctx.view.doorChangeTick,
         teammateCamps: ctx.view.teammateCamps,
         objectiveDirective: ctx.view.objectiveDirective,
+        lipCampSec: lipCampSecForPush(capturePush(ctx.view)),
       });
 
       writeCache(bag, out);

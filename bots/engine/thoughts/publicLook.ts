@@ -146,7 +146,7 @@ export function runPublicLookStep(
   // cap combat turn rate so aim speed slows down smoothly instead of snapping.
   const slewCapped = combatLocked && combatDelayMs > 0;
   const maxTurnRadPerSubstep = slewCapped
-    ? clamp(10 / (1 + combatDelayMs / 300), 2.0, 10.0) / TICK_HZ
+    ? clamp(10 / (1 + combatDelayMs * (1 / 300)), 2.0, 10.0) / TICK_HZ
     : Number.POSITIVE_INFINITY;
   const yawSamples: number[] = [];
   const pitchSamples: number[] = [];

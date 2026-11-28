@@ -31,8 +31,9 @@ export function directionFromYawPitch(yaw: number, pitch: number): Vec3 {
 }
 
 export function normalize(v: Vec3): Vec3 {
-  const len = Math.hypot(v.x, v.y, v.z) || 1;
-  return { x: v.x / len, y: v.y / len, z: v.z / len };
+  const len = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z) || 1;
+  const inv = 1 / len;
+  return { x: v.x * inv, y: v.y * inv, z: v.z * inv };
 }
 
 /**

@@ -13,6 +13,7 @@ import {
   abs,
   approximateDistance2,
   distance2,
+  distanceSquared2,
   distance3,
   max,
   min,
@@ -111,8 +112,8 @@ export function agentDoorSpawn(
 function doorMidpoint(map: DoorsMap, side: TeamSide): Vec2 {
   const [d0, d1] = doorSegment(map.bounds, side);
   return {
-    x: (d0.x + d1.x) / 2,
-    z: (d0.z + d1.z) / 2,
+    x: (d0.x + d1.x) * 0.5,
+    z: (d0.z + d1.z) * 0.5,
   };
 }
 
@@ -152,8 +153,8 @@ export function isInEnemyDoorZone(
 export function mapCenter(map: DoorsMap): Vec2 {
   const { minX, maxX, minZ, maxZ } = map.bounds;
   return {
-    x: (minX + maxX) / 2,
-    z: (minZ + maxZ) / 2,
+    x: (minX + maxX) * 0.5,
+    z: (minZ + maxZ) * 0.5,
   };
 }
 
@@ -657,8 +658,10 @@ function fallbackDoorCamp(
     };
     const resolved = collision.resolvePosition(raw.x, raw.z);
     if (collision.classifyProbe(resolved.x, resolved.z) !== "clear") continue;
+    const doorReach = opts.minDist * 0.85;
     if (
-      distance2(resolved.x - door.x, resolved.z - door.z) < opts.minDist * 0.85
+      doorReach > 0 &&
+      distanceSquared2(resolved.x - door.x, resolved.z - door.z) < doorReach * doorReach
     ) {
       continue;
     }
@@ -723,8 +726,8 @@ export function smartDetourYawOffset(
   // Keep peels in the forward-ish hemisphere. ±2π/3 (~120°) was walking bots
   // south away from the door after wall-escape detours.
   const candidates = [
-    PI / 4,
-    -PI / 4,
+    PI * 0.25,
+    -PI * 0.25,
     PI / 2.2,
     -PI / 2.2,
     PI / 3,
@@ -761,6 +764,6 @@ export function smartDetourYawOffset(
   const u2 = rng();
   const sign = (Number.isFinite(u) ? u : 0.5) < 0.5 ? -1 : 1;
   const t = Number.isFinite(u2) ? u2 : 0.5;
-  const mag = PI / 4 + t * (PI / 5);
+  const mag = PI * 0.25 + t * (PI / 5);
   return sign * mag;
 }

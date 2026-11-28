@@ -51,6 +51,8 @@ export type PlayerHitPose = HitVec3 & {
   landingAmount?: number;
   /** Gameplay scale (e.g. bosses), independent of equipped cosmetics. */
   scale?: number;
+  /** Vertical-only height stretch multiplier on top of `scale` (e.g. tall zombots). */
+  scaleY?: number;
   /** Continuous animation blends; authority may also supply discrete stances. */
   crouchAmount?: number;
   slideAmount?: number;
@@ -166,14 +168,15 @@ export function playerHitAnimation(pose: PlayerHitPose): PlayerHitAnimation {
   const cosYaw = Math.cos(yaw);
   const localX = vx * cosYaw - vz * sinYaw;
   const localZ = -vx * sinYaw - vz * cosYaw;
-  const speed = Math.hypot(localX, localZ);
+  const speed = Math.sqrt(localX * localX + localZ * localZ);
   const locomotionAmount = smooth01(
     LOCOMOTION_ACTIVE_START,
     LOCOMOTION_WALK_SPEED,
     speed,
   );
-  const localRight = speed > 1e-6 ? localX / speed : 0;
-  const localForward = speed > 1e-6 ? localZ / speed : 0;
+  const invSpeed = speed > 1e-6 ? 1 / speed : 0;
+  const localRight = localX * invSpeed;
+  const localForward = localZ * invSpeed;
   const sprintSpeed = smooth01(
     LOCOMOTION_SPRINT_START,
     LOCOMOTION_SPRINT_END,
@@ -345,7 +348,7 @@ export function getPlayerHitVolumes(pose: PlayerHitPose): PlayerHitVolumes {
   // The neck remains a body target where it joins the head.
   points.push(torsoPoint(
     0,
-    playerUpperBodyWorldY((PLAYER_NECK_BOTTOM_Y + PLAYER_NECK_TOP_Y) / 2),
+    playerUpperBodyWorldY((PLAYER_NECK_BOTTOM_Y + PLAYER_NECK_TOP_Y) * 0.5),
     0,
   ));
   ring((x, y, z) => v(x * stance.scaleX, stance.pelvisY + (y - PLAYER_HIP_Y) * stance.pieceY, stance.pelvisZ + z * stance.scaleZ),
@@ -361,7 +364,7 @@ export function getPlayerHitVolumes(pose: PlayerHitPose): PlayerHitVolumes {
     const thigh = (PLAYER_HIP_Y - 0.35) * stance.pieceY;
     const shin = (0.35 - ankleY) * stance.pieceY;
     const down = stance.pelvisY - ankleY, back = stance.pelvisZ - footZ;
-    const distance = clamp(Math.hypot(down, back), 0.00001, thigh + shin);
+    const distance = clamp(Math.sqrt(down * down + back * back), 0.00001, thigh + shin);
     const hipPitch = Math.atan2(back, down) + Math.acos(clamp((thigh * thigh + distance * distance - shin * shin) / (2 * thigh * distance), -1, 1));
     const kneeY = stance.pelvisY - thigh * Math.cos(hipPitch);
     const kneeZ = stance.pelvisZ - thigh * Math.sin(hipPitch);
@@ -394,7 +397,7 @@ export function getPlayerHitVolumes(pose: PlayerHitPose): PlayerHitVolumes {
   }
   // Hands are targets; the gun and muzzle flash are deliberately excluded.
   const grip = torsoPoint(0, playerUpperBodyWorldY(1.07), 0);
-  const handGrowth = 0.085 * (PLAYER_HAND_THICKNESS_SCALE - 1) / 2;
+  const handGrowth = 0.085 * (PLAYER_HAND_THICKNESS_SCALE - 1) * 0.5;
   points.push(add(grip, upperVector(v(-0.19 - handGrowth, 0, -0.29))),
     add(grip, upperVector(v(0.24 + handGrowth, 0, -0.25))));
   if (slide > 0) {
@@ -405,12 +408,13 @@ export function getPlayerHitVolumes(pose: PlayerHitPose): PlayerHitVolumes {
   const body = fitCylinder(points, axisPitch);
 
   const scale = Math.max(0.1, finite(pose.scale, 1)) * PLAYER_FIGURE_SCALE;
+  const scaleY = Math.max(0.1, finite(pose.scaleY, 1));
   const rootVector = (p: HitVec3) => {
     const r = rotateY(
       rotateX(rotateZ(p, animation.rootRoll), animation.rootPitch),
       finite(pose.yaw),
     );
-    return v(r.x * scale, r.y * scale, r.z * scale);
+    return v(r.x * scale, r.y * scale * scaleY, r.z * scale);
   };
   const feet = v(pose.x, feetYFromEye(pose.y, Boolean(pose.crouch)), pose.z);
   const rigOffset = animation.rigOffset;
@@ -449,13 +453,19 @@ function fitCylinder(points: HitVec3[], pitch: number): HitVolume {
     minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
     minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
   }
-  const center = v((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2);
-  const rx = (maxX - minX) / 2 + 0.008;
-  const rz = (maxZ - minZ) / 2 + 0.008;
+  const center = v((minX + maxX) * 0.5, (minY + maxY) * 0.5, (minZ + maxZ) * 0.5);
+  const rx = (maxX - minX) * 0.5 + 0.008;
+  const rz = (maxZ - minZ) * 0.5 + 0.008;
   let radial = 1;
-  for (const p of local) radial = Math.max(radial, ((p.x - center.x) / rx) ** 2 + ((p.z - center.z) / rz) ** 2);
+  const invRx = 1 / rx;
+  const invRz = 1 / rz;
+  for (const p of local) {
+    const nx = (p.x - center.x) * invRx;
+    const nz = (p.z - center.z) * invRz;
+    radial = Math.max(radial, nx * nx + nz * nz);
+  }
   const pad = Math.sqrt(radial);
-  const halfHeight = (maxY - minY) / 2 + 0.008;
+  const halfHeight = (maxY - minY) * 0.5 + 0.008;
   // Trim 12% of the height from the top only, preserving the bottom cap,
   // width, depth and animation-driven orientation in every mode.
   center.y -= halfHeight * BODY_TOP_REDUCTION;
@@ -474,7 +484,8 @@ function localRay(origin: HitVec3, dir: HitVec3, volume: HitVolume) {
   const iz = cross(volume.xAxis, volume.yAxis);
   const determinant = dot(volume.xAxis, ix);
   if (Math.abs(determinant) < 1e-12) return null;
-  const transform = (p: HitVec3) => v(dot(p, ix) / determinant, dot(p, iy) / determinant, dot(p, iz) / determinant);
+  const invDet = 1 / determinant;
+  const transform = (p: HitVec3) => v(dot(p, ix) * invDet, dot(p, iy) * invDet, dot(p, iz) * invDet);
   return { origin: transform(sub(origin, volume.center)), dir: transform(dir) };
 }
 
@@ -529,7 +540,8 @@ export function rayVerticalCapsule(origin: HitVec3, dir: HitVec3, cx: number, cz
     const discriminant = b * b - a * c;
     if (discriminant >= 0) {
       const root = Math.sqrt(discriminant);
-      for (const t of [(-b - root) / a, (-b + root) / a]) {
+      const invA = 1 / a;
+      for (const t of [(-b - root) * invA, (-b + root) * invA]) {
         const y = origin.y + dir.y * t;
         if (y >= yMin && y <= yMax) consider(t);
       }
@@ -538,7 +550,9 @@ export function rayVerticalCapsule(origin: HitVec3, dir: HitVec3, cx: number, cz
   if (Math.abs(dir.y) > 1e-16) {
     for (const y of [yMin, yMax]) {
       const t = (y - origin.y) / dir.y;
-      if ((ox + dir.x * t) ** 2 + (oz + dir.z * t) ** 2 <= radius * radius) consider(t);
+      const hx = ox + dir.x * t;
+      const hz = oz + dir.z * t;
+      if (hx * hx + hz * hz <= radius * radius) consider(t);
     }
   }
   return best;

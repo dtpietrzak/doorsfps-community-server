@@ -70,7 +70,7 @@ import {
 import { DEFAULT_BOT_DIFFICULTY } from "./difficulty.ts";
 import { DynamicArenaDirector } from "./dynamicArenaDifficulty.ts";
 import { botThinksOnSimPhase } from "./helpers/combat.ts";
-import { agentDoorSpawn } from "./helpers/nav.ts";
+import { agentDoorSpawn, enemyDoorTarget } from "./helpers/nav.ts";
 import { botLifeRandomSeed } from "./shadow/types.ts";
 import {
   type ChurnPolicy,
@@ -124,6 +124,7 @@ import {
   dropInterpOnSpawn,
   sampleTickAction,
 } from "./pipeline/botInputAdapter.ts";
+import { PI, RAD_PER_DEG, TWO_PI } from "../shared/math/index.ts";
 
 export {
   BOT_TICK_HZ,
@@ -172,8 +173,8 @@ function pipelineReadyAction(
 
 function wrappedAngleDelta(left: number, right: number): number {
   let delta = left - right;
-  while (delta > Math.PI) delta -= Math.PI * 2;
-  while (delta < -Math.PI) delta += Math.PI * 2;
+  while (delta > PI) delta -= TWO_PI;
+  while (delta < -PI) delta += TWO_PI;
   return Math.abs(delta);
 }
 
@@ -248,7 +249,7 @@ function comparePipelineActions(
   else if (!shootMatch) kind = "shoot";
   else if (!stanceMatch) kind = "stance";
   else if (
-    yawDelta > (Math.PI * 5) / 180 || pitchDelta > (Math.PI * 5) / 180
+    yawDelta > 5 * RAD_PER_DEG || pitchDelta > 5 * RAD_PER_DEG
   ) {
     kind = "look";
   }
@@ -2550,13 +2551,23 @@ export class BotManager {
     const matchOver = this.players.isMatchOver();
     let combatDelayMsA: number | undefined;
     let combatDelayMsB: number | undefined;
+    let doorPushA: number | undefined;
+    let doorPushB: number | undefined;
     let objectiveDirectiveFor:
       | ((playerId: string) => import("./dynamicArenaDifficulty.ts").BotObjectiveDirective | undefined)
       | undefined;
     if (this.dynamicArena !== null) {
-      this.dynamicArena.onTick(players, teamScores, matchOver);
+      this.dynamicArena.onTick(players, teamScores, matchOver, {
+        doorsOpen: doorCycle.doorsOpen,
+        enemyDoors: {
+          A: enemyDoorTarget(collision.map, "A"),
+          B: enemyDoorTarget(collision.map, "B"),
+        },
+      });
       combatDelayMsA = this.dynamicArena.getCombatDelayMs("A");
       combatDelayMsB = this.dynamicArena.getCombatDelayMs("B");
+      doorPushA = this.dynamicArena.getDoorPush("A");
+      doorPushB = this.dynamicArena.getDoorPush("B");
       objectiveDirectiveFor = (id) => this.dynamicArena!.getDirective(id);
     }
     const frame = buildThinkFrame({
@@ -2570,6 +2581,8 @@ export class BotManager {
       teamScoreB: teamScores.B,
       combatDelayMsA,
       combatDelayMsB,
+      doorPushA,
+      doorPushB,
       objectiveDirectiveFor,
       matchOver,
     });
@@ -2839,11 +2852,11 @@ export class BotManager {
           comparison.yawDelta,
           comparison.pitchDelta,
         );
-        if (maxAngleDelta <= Math.PI / 180) this.compiledWithinOneDegree += 1;
-        if (maxAngleDelta <= (Math.PI * 5) / 180) {
+        if (maxAngleDelta <= RAD_PER_DEG) this.compiledWithinOneDegree += 1;
+        if (maxAngleDelta <= 5 * RAD_PER_DEG) {
           this.compiledWithinFiveDegrees += 1;
         }
-        if (maxAngleDelta <= (Math.PI * 10) / 180) {
+        if (maxAngleDelta <= 10 * RAD_PER_DEG) {
           this.compiledWithinTenDegrees += 1;
         }
         if (Number.isFinite(comparison.yawDelta)) {
@@ -2860,7 +2873,7 @@ export class BotManager {
             comparison.pitchDelta,
           );
         }
-        if (!comparison.discreteMatch || maxAngleDelta > (Math.PI * 5) / 180) {
+        if (!comparison.discreteMatch || maxAngleDelta > 5 * RAD_PER_DEG) {
           this.compiledMismatches += 1;
           const dump: PipelineMismatchDump = {
             tick: input.frame.tick,

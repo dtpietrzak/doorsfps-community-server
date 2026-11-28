@@ -308,8 +308,8 @@ export function zombotsRoomRaster(map: ZombotsDoorMap): ZombotsRoomRaster {
   const roomCount = grid.label();
 
   const corner = cornerPoint(map.bounds, map.spawnCorner ?? 0);
-  const cx = (map.bounds.minX + map.bounds.maxX) / 2;
-  const cz = (map.bounds.minZ + map.bounds.maxZ) / 2;
+  const cx = (map.bounds.minX + map.bounds.maxX) * 0.5;
+  const cz = (map.bounds.minZ + map.bounds.maxZ) * 0.5;
   const padRoom = grid.roomNear({
     x: corner.x + (cx > corner.x ? PAD_SEED_INSET : -PAD_SEED_INSET),
     z: corner.z + (cz > corner.z ? PAD_SEED_INSET : -PAD_SEED_INSET),
@@ -326,9 +326,10 @@ export function zombotsRoomRaster(map: ZombotsDoorMap): ZombotsRoomRaster {
     const dx = block.b.x - block.a.x;
     const dz = block.b.z - block.a.z;
     const len = distance2(dx, dz);
-    const mid = { x: (block.a.x + block.b.x) / 2, z: (block.a.z + block.b.z) / 2 };
-    const nx = len > 1e-6 ? -dz / len : 0;
-    const nz = len > 1e-6 ? dx / len : 0;
+    const mid = { x: (block.a.x + block.b.x) * 0.5, z: (block.a.z + block.b.z) * 0.5 };
+    const invLen = len > 1e-6 ? 1 / len : 0;
+    const nx = -dz * invLen;
+    const nz = dx * invLen;
     const left = grid.roomNear({ x: mid.x + nx * probe, z: mid.z + nz * probe });
     const right = grid.roomNear({ x: mid.x - nx * probe, z: mid.z - nz * probe });
     doorRooms.push({

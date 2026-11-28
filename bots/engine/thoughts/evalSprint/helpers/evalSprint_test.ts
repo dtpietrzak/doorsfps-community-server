@@ -6,9 +6,16 @@ import { MapCollision } from "../../../world/MapCollision.ts";
 import { enemyDoorTarget, yawToward } from "../../../helpers/nav.ts";
 import {
   canOpenSprintFromStamina,
+  DOOR_PUSH_RUSH_MIN_STAMINA_FRAC,
+  DOOR_PUSH_RUSH_RESUME_STAMINA_FRAC,
+  DOOR_RUSH_MIN_STAMINA_FRAC,
+  DOOR_RUSH_RESUME_STAMINA_FRAC,
+  doorRushSprintChance,
+  doorRushStaminaFracs,
   isMoveTowardEnemyDoor,
   isMoveTowardEnemyDoorLenient,
   OPEN_SPRINT_MIN_STAMINA_FRAC,
+  stepEvalDoorRushSprint,
   stepEvalOpenSprint,
   stepEvalSprint,
 } from "./evalSprint.ts";
@@ -374,4 +381,114 @@ Deno.test("stepEvalOpenSprint: at stamina gate refuses; just above allows", () =
     }),
     true,
   );
+});
+
+Deno.test("doorRushSprintChance: tiers rush far more often than open-lane", () => {
+  assertEquals(doorRushSprintChance(0.22) > 0.6, true);
+  assertEquals(doorRushSprintChance(0.42) > 0.85, true);
+  assertEquals(doorRushSprintChance(0.65), 1);
+  assertEquals(doorRushSprintChance(-5), 0);
+});
+
+Deno.test("stepEvalDoorRushSprint: sprints below the open-lane stamina gate", () => {
+  const map = miniMap();
+  const collision = new MapCollision(map);
+  const door = enemyDoorTarget(map, "A");
+  const moveYaw = yawToward(0, 0, door.x, door.z);
+  const stamina = SPRINT_DURATION_S * (OPEN_SPRINT_MIN_STAMINA_FRAC - 0.2);
+  assertEquals(canOpenSprintFromStamina(stamina), false);
+  assertEquals(
+    stepEvalDoorRushSprint({
+      map,
+      team: "A",
+      x: 0,
+      z: 0,
+      moveYaw,
+      collision,
+      sprintStamina: stamina,
+      winded: false,
+    }),
+    { want: true, winded: false },
+  );
+  // Retreating from the door never rushes.
+  assertEquals(
+    stepEvalDoorRushSprint({
+      map,
+      team: "A",
+      x: 0,
+      z: 0,
+      moveYaw: moveYaw + Math.PI,
+      collision,
+      sprintStamina: SPRINT_DURATION_S,
+      winded: false,
+    }).want,
+    false,
+  );
+});
+
+Deno.test("stepEvalDoorRushSprint: winded hysteresis walks until refilled", () => {
+  const map = miniMap();
+  const collision = new MapCollision(map);
+  const door = enemyDoorTarget(map, "A");
+  const moveYaw = yawToward(0, 0, door.x, door.z);
+  const at = (frac: number, winded: boolean) =>
+    stepEvalDoorRushSprint({
+      map,
+      team: "A",
+      x: 0,
+      z: 0,
+      moveYaw,
+      collision,
+      sprintStamina: SPRINT_DURATION_S * frac,
+      winded,
+    });
+  assertEquals(at(DOOR_RUSH_MIN_STAMINA_FRAC, false), {
+    want: false,
+    winded: true,
+  });
+  const mid = (DOOR_RUSH_MIN_STAMINA_FRAC + DOOR_RUSH_RESUME_STAMINA_FRAC) / 2;
+  assertEquals(at(mid, true), { want: false, winded: true });
+  assertEquals(at(mid, false), { want: true, winded: false });
+  assertEquals(at(DOOR_RUSH_RESUME_STAMINA_FRAC, true), {
+    want: true,
+    winded: false,
+  });
+});
+
+Deno.test("door rush: trailing push raises the roll and drains the bar deeper", () => {
+  assertEquals(doorRushSprintChance(0.22, 0), doorRushSprintChance(0.22));
+  assertEquals(doorRushSprintChance(0.22, 1), 1);
+  const half = doorRushSprintChance(0.22, 0.5);
+  assertEquals(half > doorRushSprintChance(0.22) && half < 1, true);
+  assertEquals(doorRushStaminaFracs(0), {
+    min: DOOR_RUSH_MIN_STAMINA_FRAC,
+    resume: DOOR_RUSH_RESUME_STAMINA_FRAC,
+  });
+  const full = doorRushStaminaFracs(1);
+  assertEquals(
+    Math.abs(full.min - DOOR_PUSH_RUSH_MIN_STAMINA_FRAC) < 1e-9,
+    true,
+  );
+  assertEquals(
+    Math.abs(full.resume - DOOR_PUSH_RUSH_RESUME_STAMINA_FRAC) < 1e-9,
+    true,
+  );
+  // Pushed rusher keeps sprinting at a stamina an unpushed one is winded at.
+  const map = miniMap();
+  const collision = new MapCollision(map);
+  const door = enemyDoorTarget(map, "A");
+  const moveYaw = yawToward(0, 0, door.x, door.z);
+  const stamina = SPRINT_DURATION_S * 0.08;
+  const args = {
+    map,
+    team: "A" as const,
+    x: 0,
+    z: 0,
+    moveYaw,
+    collision,
+    sprintStamina: stamina,
+    winded: false,
+  };
+  assertEquals(stepEvalDoorRushSprint(args).want, false);
+  assertEquals(stepEvalDoorRushSprint({ ...args, push: 1 }).want, true);
 });

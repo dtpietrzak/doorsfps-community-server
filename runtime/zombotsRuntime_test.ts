@@ -629,3 +629,106 @@ Deno.test("zombots: moving zombie is not relocated and hits maxLifetimeMs cap", 
   }
   assertEquals(h.zombies.has(zid), false, "zombie must be auto-killed at maxLifetimeMs");
 });
+
+Deno.test("zombots: every 17th zombie is tall with 0.85x walk, 1.75x sprint burst, and 0.75s stop", () => {
+  const spacedMap: DoorsMap = {
+    ...OPEN_MAP,
+    zombieSpawns: Array.from({ length: 14 }, (_, i) => ({
+      id: `zs${i + 1}`,
+      p: { x: -16 + i * 2.5, z: 15 },
+    })),
+  };
+  const h = harness(spacedMap);
+  // 4 humans → wave 1 spawns 17 zombies (6 * 2.8 = 16.8 → 17).
+  h.join("p1");
+  h.join("p2");
+  h.join("p3");
+  h.join("p4");
+  const initialTicks = Math.ceil(
+    (ZOMBOTS_TUNING.timing.firstIntermissionMs +
+      ZOMBOTS_TUNING.timing.spawnIntervalMs * 14) /
+      (1000 / TICK_HZ),
+  ) + 5;
+  h.steps(initialTicks);
+  // Clear 4 zombies so zombies 15..17 can spawn under maxAlive (14).
+  for (let i = 1; i <= 4; i++) {
+    const id = `bot:zombie-${i}`;
+    h.players.get(id)!.takeDamage(10_000, "body", h.tick, 0);
+    h.step([{
+      shot: {
+        shooterId: "p1",
+        origin: [0, 0, 0],
+        direction: [0, 0, 1],
+        weapon: WEAPON_PISTOL,
+        hitId: id,
+        hitZone: "body",
+        hitPoint: null,
+      },
+      damages: [{
+        targetId: id,
+        shooterId: "p1",
+        damage: 100,
+        health: 0,
+        zone: "body",
+        alive: false,
+        killed: true,
+        critical: false,
+      }],
+    }]);
+  }
+  const restTicks = Math.ceil(
+    (ZOMBOTS_TUNING.timing.spawnIntervalMs * 4) / (1000 / TICK_HZ),
+  ) + 5;
+  h.steps(restTicks);
+
+  const z17 = h.players.get("bot:zombie-tall-17")!;
+  assert(z17, "expected 17th zombie to spawn as bot:zombie-tall-17");
+  assertEquals(z17.modelScale, 1);
+  assertEquals(
+    z17.moveSpeedScale,
+    ZOMBOTS_TUNING.zombie.baseSpeedScale *
+      ZOMBOTS_TUNING.zombie.tallWalkSpeedMultiplier,
+  );
+  assertEquals(z17.maxHealth, ZOMBOTS_TUNING.zombie.baseHealth);
+
+  // Drive z17 forward in open space across walk, sprint, and pause phases.
+  const collision = new MapCollision(OPEN_MAP);
+  const walkBase = z17.moveSpeedScale;
+  let seq = 0;
+  const stepSpeedAtElapsedMs = (elapsedMs: number): number => {
+    seq += 1;
+    z17.x = 0;
+    z17.z = 0;
+    z17.onGround = true;
+    const targetTick = z17.spawnedAtTick + Math.round((elapsedMs / 1000) * TICK_HZ);
+    z17.queueInput({
+      sequence: seq,
+      forward: true,
+      backward: false,
+      left: false,
+      right: false,
+      jump: false,
+      crouch: false,
+      sprint: false,
+      yaw: 0,
+      pitch: 0,
+    }, targetTick * (1000 / TICK_HZ));
+    z17.update(collision, targetTick, []);
+    return Math.hypot(z17.velocityX, z17.velocityZ);
+  };
+
+  const walkSpeed = stepSpeedAtElapsedMs(1_000);
+  const sprintSpeed = stepSpeedAtElapsedMs(6_000);
+  const pauseSpeed = stepSpeedAtElapsedMs(7_000);
+
+  assert(walkSpeed > 0, "tall zombot should move during walk phase");
+  assert(
+    Math.abs(
+      sprintSpeed / walkSpeed -
+        ZOMBOTS_TUNING.zombie.tallSprintSpeedMultiplier /
+          ZOMBOTS_TUNING.zombie.tallWalkSpeedMultiplier,
+    ) < 1e-3,
+    `expected sprint/walk ratio ~${(ZOMBOTS_TUNING.zombie.tallSprintSpeedMultiplier / ZOMBOTS_TUNING.zombie.tallWalkSpeedMultiplier).toFixed(3)}, got ${(sprintSpeed / walkSpeed).toFixed(3)} (walkBase=${walkBase})`,
+  );
+  assertEquals(pauseSpeed, 0, "tall zombot must stop completely during 0.75s pause");
+});

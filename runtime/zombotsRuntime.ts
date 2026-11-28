@@ -545,8 +545,8 @@ export class ZombotsRuntime {
       spawnGate: gate,
       seq: this.zombieSeq,
     });
-    const cx = (map.bounds.minX + map.bounds.maxX) / 2;
-    const cz = (map.bounds.minZ + map.bounds.maxZ) / 2;
+    const cx = (map.bounds.minX + map.bounds.maxX) * 0.5;
+    const cz = (map.bounds.minZ + map.bounds.maxZ) * 0.5;
     for (const d of decisions) {
       if (d.kind === "kill") {
         this.logStuck(`kill:${d.reason}`, run, d.id, players.get(d.id) ?? { x: NaN, z: NaN }, d.stats);
@@ -576,7 +576,7 @@ export class ZombotsRuntime {
     console.warn(
       `[zombots] stuck ${action} map=${mapName} wave=${run.match.wave} id=${zombieId}` +
         ` pos=(${pos.x.toFixed(2)},${pos.z.toFixed(2)}) room=${room ?? "wall"}` +
-        ` noProgress=${(stats.noProgressMs / 1000).toFixed(1)}s age=${(stats.ageMs / 1000).toFixed(1)}s` +
+        ` noProgress=${(stats.noProgressMs * 0.001).toFixed(1)}s age=${(stats.ageMs * 0.001).toFixed(1)}s` +
         ` relocates=${stats.relocates}${dest}`,
     );
   }
@@ -877,11 +877,15 @@ export class ZombotsRuntime {
     this.zombieSeq += 1;
     const n = this.zombieSeq;
     const map = this.deps.map();
-    const cx = (map.bounds.minX + map.bounds.maxX) / 2;
-    const cz = (map.bounds.minZ + map.bounds.maxZ) / 2;
+    const cx = (map.bounds.minX + map.bounds.maxX) * 0.5;
+    const cz = (map.bounds.minZ + map.bounds.maxZ) * 0.5;
     const spawned = this.deps.bots.spawnZombie({
-      // The client reads the grandpa prefix to hunch the body.
-      id: intent.grandpa ? `bot:zombie-grandpa-${n}` : `bot:zombie-${n}`,
+      // The client reads the grandpa / tall prefix to hunch or stretch the body.
+      id: intent.grandpa
+        ? `bot:zombie-grandpa-${n}`
+        : intent.tall
+        ? `bot:zombie-tall-${n}`
+        : `bot:zombie-${n}`,
       name: n === 1 ? "zombie" : `zombie${n}`,
       team: ZOMBOTS_ZOMBIE_TEAM,
       x: intent.p.x,

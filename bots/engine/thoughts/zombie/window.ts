@@ -114,6 +114,7 @@ export const ZOMBIE_WINDOW_FUNNEL = 0.6;
 const CROSSED_DEPTH = 0.75;
 /** Within this of the approach point, steer by hand instead of nav (m). */
 const ALIGN_RADIUS = 2.5;
+const ALIGN_RADIUS_SQ = ALIGN_RADIUS * ALIGN_RADIUS;
 /** A new window must beat the latched one by this much (m) to switch. */
 const SWITCH_MARGIN = 3;
 /** Sample this far off the wall line to tell the zombie side (m). */
@@ -290,9 +291,10 @@ function clearRun(
   const dz = to.z - from.z;
   const len = distance2(dx, dz);
   if (len <= 1e-6) return true;
-  const steps = ceil(len / (NAV_CELL / 2));
-  const perpX = margin > 0 ? (-dz / len) * margin : 0;
-  const perpZ = margin > 0 ? (dx / len) * margin : 0;
+  const steps = ceil(len / (NAV_CELL * 0.5));
+  const invLen = 1 / len;
+  const perpX = margin > 0 ? -dz * invLen * margin : 0;
+  const perpZ = margin > 0 ? dx * invLen * margin : 0;
   for (let k = 1; k <= steps; k++) {
     const t = k / steps;
     if ((1 - t) * len < endSlack) break;
@@ -416,7 +418,8 @@ export function buildZombieWindowNav(
 
   // Door gaps sit in a wall band, so they're never floor until opened.
   const doorCells: { doorId: string; cells: number[] }[] = [];
-  const reach = SLIDING_DOOR_WIDTH / 2 + NAV_CELL;
+  const reach = SLIDING_DOOR_WIDTH * 0.5 + NAV_CELL;
+  const reachSq = reach * reach;
   const doors = map.doors ?? [];
   for (let d = 0; d < doors.length; d++) {
     const door = doors[d]!;
@@ -431,7 +434,7 @@ export function buildZombieWindowNav(
         );
         if (n < 0 || grid.floor[n]) continue;
         const c = cellCenter(grid, n);
-        if (distance2(c.x - door.center.x, c.z - door.center.z) > reach) {
+        if (distanceSquared2(c.x - door.center.x, c.z - door.center.z) > reachSq) {
           continue;
         }
         if (cells.indexOf(n) < 0) cells.push(n);
@@ -698,7 +701,7 @@ export function zombieWindowPlan(
   state.halfWallVaultTicksLeft = UNSET;
   const a = approachPoint(portal);
   if (
-    distance2(a.x - self.x, a.z - self.z) <= ALIGN_RADIUS &&
+    distanceSquared2(a.x - self.x, a.z - self.z) <= ALIGN_RADIUS_SQ &&
     depth > 0 &&
     clearRun(nav.grid, portal.field, self, a, NAV_CELL)
   ) {

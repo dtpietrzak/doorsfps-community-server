@@ -288,6 +288,12 @@ export type ThinkFrame = Readonly<{
    */
   combatDelayMsA?: number;
   combatDelayMsB?: number;
+  /**
+   * Per-team trailing door push (0..1). Omitted / 0 = no push. Only bots
+   * with the `capture` objective act on it (early lip camp, harder rush).
+   */
+  doorPushA?: number;
+  doorPushB?: number;
   players: readonly PlayerSnapshot[];
   /**
    * In-process only, never on the wire: a residual route prior a private

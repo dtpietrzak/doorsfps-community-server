@@ -185,7 +185,7 @@ export function resolveLagCompWindow(
     ? input.pingJitterMs
     : 0;
 
-  const oneWayMs = clamp(rttMs / 2, 0, LAG_COMP_ONE_WAY_MAX_MS);
+  const oneWayMs = clamp(rttMs * 0.5, 0, LAG_COMP_ONE_WAY_MAX_MS);
 
   const applied = sanitizeLastAppliedSnapshotTick({
     lastApplied: input.lastAppliedSnapshotTick,

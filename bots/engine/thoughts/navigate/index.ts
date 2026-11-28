@@ -30,7 +30,8 @@ import type {
   ThinkContext,
   ThinkStep,
 } from "../../pipeline/types.ts";
-import type { BotBrainState } from "../../types.ts";
+import { type BotBrainState, capturePush } from "../../types.ts";
+import { SPRINT_DURATION_S } from "../../../../shared/sim/game.ts";
 import { worldMoveYawFromPrior } from "../targetEnemy/helpers/targetEnemy.ts";
 import {
   combatMoveInput,
@@ -198,16 +199,21 @@ export function runNavigateStep(
       }
       if (campPlanted) {
         // Idle hold on the capture lip. ADAD strafe may land later.
-        const ready: ReadyAction = {
-          input: walkInput(prior.desiredYaw, pathPitch, false, {
-            forward: false,
-            backward: false,
-            left: false,
-            right: false,
-          }),
-          weapon,
-          reload,
-        };
+        const input = walkInput(prior.desiredYaw, pathPitch, false, {
+          forward: false,
+          backward: false,
+          left: false,
+          right: false,
+        });
+        // Trailing capture bot banks stamina for the rush: crouch regen is
+        // faster, and doors-open flips the mode to path (stand + W).
+        if (
+          !ctx.view.doorsOpen && capturePush(ctx.view) > 0 &&
+          me.sprintStamina < SPRINT_DURATION_S
+        ) {
+          input.crouch = true;
+        }
+        const ready: ReadyAction = { input, weapon, reload };
         return { out: ready };
       }
       // Map under look intent so straight runs stay pure W; corners add opposite strafe.

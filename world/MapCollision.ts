@@ -34,6 +34,7 @@ import {
   ceil,
   distance2,
   distance3,
+  distanceSquared2,
   fastAtan2,
   fastCos,
   fastSin,
@@ -373,10 +374,11 @@ export class MapCollision {
   ): number | null {
     const len = distance3(direction.x, direction.y, direction.z);
     if (len < 1e-12 || maxRange <= 0) return null;
+    const invLen = 1 / len;
     const dir: Vec3 = {
-      x: direction.x / len,
-      y: direction.y / len,
-      z: direction.z / len,
+      x: direction.x * invLen,
+      y: direction.y * invLen,
+      z: direction.z * invLen,
     };
 
     let best: number | null = null;
@@ -881,14 +883,15 @@ export class MapCollision {
     const corner = this.spawnRng() < 0.5 ? side.corners[0] : side.corners[1];
     const c = cornerWorld(this.map.bounds, corner);
     const { minX, maxX, minZ, maxZ } = this.map.bounds;
-    const cx = (minX + maxX) / 2;
-    const cz = (minZ + maxZ) / 2;
+    const cx = (minX + maxX) * 0.5;
+    const cz = (minZ + maxZ) * 0.5;
 
     let chosenX = c.x;
     let chosenZ = c.z;
     let found = false;
     let lastX = c.x;
     let lastZ = c.z;
+    const spawnReach = side.spawnRadius * 1.2;
     for (let i = 0; i < RANDOM_SPAWN_ATTEMPTS; i++) {
       const ang = this.spawnRng() * PI * 2;
       const r = this.spawnRng() * side.spawnRadius;
@@ -896,16 +899,17 @@ export class MapCollision {
       const towardX = cx - c.x;
       const towardZ = cz - c.z;
       const tlen = distance2(towardX, towardZ) || 1;
+      const invTlen = 1 / tlen;
       const nx = c.x + fastCos(ang) * r * 0.55 +
-        (towardX / tlen) * (0.8 + this.spawnRng());
+        (towardX * invTlen) * (0.8 + this.spawnRng());
       const nz = c.z + fastSin(ang) * r * 0.55 +
-        (towardZ / tlen) * (0.8 + this.spawnRng());
+        (towardZ * invTlen) * (0.8 + this.spawnRng());
       const resolved = this.resolvePosition(nx, nz);
       lastX = resolved.x;
       lastZ = resolved.z;
       if (
-        !found &&
-        distance2(lastX - c.x, lastZ - c.z) < side.spawnRadius * 1.2
+        !found && spawnReach > 0 &&
+        distanceSquared2(lastX - c.x, lastZ - c.z) < spawnReach * spawnReach
       ) {
         chosenX = lastX;
         chosenZ = lastZ;
@@ -979,8 +983,8 @@ function doorFrame(
   halfLen: number;
 } {
   const [d0, d1] = doorSegment(map.bounds, side);
-  const mid = { x: (d0.x + d1.x) / 2, z: (d0.z + d1.z) / 2 };
-  const halfLen = distance2(d1.x - d0.x, d1.z - d0.z) / 2;
+  const mid = { x: (d0.x + d1.x) * 0.5, z: (d0.z + d1.z) * 0.5 };
+  const halfLen = distance2(d1.x - d0.x, d1.z - d0.z) * 0.5;
 
   // Consistent world axes so opposite edges share the same "left/right" sense.
   let alongX = 0;
@@ -992,13 +996,14 @@ function doorFrame(
   }
 
   const { minX, maxX, minZ, maxZ } = map.bounds;
-  const cx = (minX + maxX) / 2;
-  const cz = (minZ + maxZ) / 2;
+  const cx = (minX + maxX) * 0.5;
+  const cz = (minZ + maxZ) * 0.5;
   let inwardX = cx - mid.x;
   let inwardZ = cz - mid.z;
   const ilen = distance2(inwardX, inwardZ) || 1;
-  inwardX /= ilen;
-  inwardZ /= ilen;
+  const invIlen = 1 / ilen;
+  inwardX *= invIlen;
+  inwardZ *= invIlen;
 
   return { mid, alongX, alongZ, inwardX, inwardZ, halfLen };
 }
@@ -1232,8 +1237,9 @@ function segmentWithEndInset(
   const dz = b.z - a.z;
   const len = distance2(dx, dz);
   if (len < 2 * inset + 1e-6) return null;
-  const ux = dx / len;
-  const uz = dz / len;
+  const invLen = 1 / len;
+  const ux = dx * invLen;
+  const uz = dz * invLen;
   return {
     a: { x: a.x + ux * inset, z: a.z + uz * inset },
     b: { x: b.x - ux * inset, z: b.z - uz * inset },
@@ -1287,8 +1293,9 @@ function pushCircleFromSegment(
   if (dist < 1e-8) {
     // Centered on segment — push along a perpendicular
     const plen = distance2(abx, abz) || 1;
-    nx = -abz / plen;
-    nz = abx / plen;
+    const invPlen = 1 / plen;
+    nx = -abz * invPlen;
+    nz = abx * invPlen;
     dist = 0;
   } else {
     nx /= dist;
@@ -1318,8 +1325,9 @@ function rayThickSegment(
   const segLen = distance2(abx, abz);
   if (segLen < 1e-8) return null;
 
-  const ax = abx / segLen;
-  const az = abz / segLen;
+  const invSegLen = 1 / segLen;
+  const ax = abx * invSegLen;
+  const az = abz * invSegLen;
   // Perpendicular in XZ (right-handed with up = +Y).
   const px = -az;
   const pz = ax;
@@ -1382,8 +1390,9 @@ function rayAabbLocal(
       if (o < -h || o > h) return null;
       continue;
     }
-    let t1 = (-h - o) / d;
-    let t2 = (h - o) / d;
+    const invD = 1 / d;
+    let t1 = (-h - o) * invD;
+    let t2 = (h - o) * invD;
     if (t1 > t2) {
       const tmp = t1;
       t1 = t2;

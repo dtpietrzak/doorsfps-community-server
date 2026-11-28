@@ -48,7 +48,7 @@ function rngFrom(seed: number): () => number {
   let s = seed >>> 0;
   return () => {
     s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
-    return s / 4294967296;
+    return s * 2.3283064365386963e-10;
   };
 }
 
@@ -81,7 +81,7 @@ function reachableCells(): Array<{ x: number; z: number }> {
           const k = key(x, z);
           if (seen.has(k) || !free(x, z)) continue;
           // The step itself must be open, not just both ends.
-          if (!free(c.x + dx / 2, c.z + dz / 2)) continue;
+          if (!free(c.x + dx * 0.5, c.z + dz * 0.5)) continue;
           seen.add(k);
           out.push({ x, z });
         }

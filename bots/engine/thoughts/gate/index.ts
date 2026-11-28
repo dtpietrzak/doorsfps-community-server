@@ -93,6 +93,9 @@ export function runGateStep(
         bag.sprintChanceHasLatch = false;
         bag.openSprintChanceLatched = false;
         bag.openSprintChanceHasLatch = false;
+        bag.doorRushSprintLatched = false;
+        bag.doorRushSprintHasLatch = false;
+        bag.doorRushWinded = false;
         bag.reactionForEnemyId = "";
         bag.reactionReadyAtTick = UNSET;
         return {

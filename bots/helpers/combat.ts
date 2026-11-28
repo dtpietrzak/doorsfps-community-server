@@ -10,6 +10,8 @@ import {
   WEAPON_SHOTGUN,
 } from "../../shared/sim/weapons.ts";
 import { getPlayerHitVolumes } from "../../shared/sim/playerHitVolumes.ts";
+import { isTallZombotId } from "../../shared/zombots/tallZombot.ts";
+import { ZOMBOTS_TUNING } from "../../shared/zombots/zombotsTuning.ts";
 import { abs, distance3, floor, max } from "@doors/bot-engine/math";
 import type { Player } from "../../players/Player.ts";
 import type { MapCollision } from "../../world/MapCollision.ts";
@@ -373,6 +375,9 @@ function targetHitVolumes(target: Player) {
     crouch: target.crouch,
     slide: target.isSliding(),
     scale: target.modelScale,
+    scaleY: isTallZombotId(target.id)
+      ? ZOMBOTS_TUNING.zombie.tallHeightScale
+      : 1,
   });
 }
 

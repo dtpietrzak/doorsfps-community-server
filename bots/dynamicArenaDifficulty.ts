@@ -12,6 +12,11 @@
  * - Door capture modifier (`objectiveDirective`): per-bot role (`capture`,
  *   `defend`, `slay`) allocated from each team's door-capture lead/deficit,
  *   always keeping at least 1 bot on `capture`.
+ * - Trailing door push (`doorPush`, 0..1 per team): tier strength × door
+ *   deficit. Capture bots act on it (early lip camp, stamina banking, harder
+ *   door-rush sprint). See notes/dynamic-arena-bots.md §3.4.
+ * - Capture picks rank alive bots nearest the enemy door first, re-ranked on
+ *   the doors-open edge so the bot already at the door is the capturer.
  * - Tiered adaptivity keyed by `BotDifficulty`:
  *     easy   = most adaptive
  *     medium = middle
@@ -77,7 +82,72 @@ export type DynamicArenaPlayerInput = Readonly<{
   kills: number;
   deaths: number;
   spawnedAtTick: number;
+  /** Optional pose for capture ranking (omitted → ranked after posed bots). */
+  alive?: boolean;
+  x?: number;
+  z?: number;
 }>;
+
+/** Per-team enemy door points, for ranking capture candidates by distance. */
+export type DynamicArenaDoorTargets = Readonly<{
+  /** Door team A attacks (team B's door). */
+  A: Readonly<{ x: number; z: number }>;
+  /** Door team B attacks (team A's door). */
+  B: Readonly<{ x: number; z: number }>;
+}>;
+
+export type DynamicArenaTickOptions = Readonly<{
+  doorsOpen?: boolean;
+  enemyDoors?: DynamicArenaDoorTargets;
+}>;
+
+/**
+ * Max trailing door push per tier. Breezeway stays light because humans are
+ * meant to win there (bots trailing is the intended state); Terminal is
+ * full strength.
+ */
+export const DOOR_PUSH_TIER_STRENGTH: Record<BotDifficulty, number> = {
+  easy: 0.3,
+  medium: 0.65,
+  hard: 1,
+};
+
+/** Share of tier strength by deficit: -1 door → 0.6, -2 or worse → 1. */
+export function doorPushDeficitFactor(doorDiff: number): number {
+  if (!Number.isFinite(doorDiff) || doorDiff >= 0) return 0;
+  return doorDiff <= -2 ? 1 : 0.6;
+}
+
+/** Trailing door push (0..1) for a team at `doorDiff = own - enemy`. */
+export function doorPushFor(doorDiff: number, difficulty: BotDifficulty): number {
+  const strength = DOOR_PUSH_TIER_STRENGTH[difficulty] ??
+    DOOR_PUSH_TIER_STRENGTH.easy;
+  return strength * doorPushDeficitFactor(doorDiff);
+}
+
+/**
+ * Capture-candidate order: alive first, then nearest the enemy door, then id.
+ * Bots without a pose sort after posed ones (by id).
+ */
+export function rankCaptureCandidates(
+  bots: readonly DynamicArenaPlayerInput[],
+  enemyDoor: Readonly<{ x: number; z: number }> | undefined,
+): string[] {
+  const keyed = bots.map((b) => {
+    const posed = enemyDoor !== undefined && Number.isFinite(b.x) &&
+      Number.isFinite(b.z);
+    const d2 = posed
+      ? (b.x! - enemyDoor!.x) ** 2 + (b.z! - enemyDoor!.z) ** 2
+      : Infinity;
+    return { id: b.id, dead: b.alive === false ? 1 : 0, d2 };
+  });
+  keyed.sort((a, b) =>
+    a.dead - b.dead ||
+    (a.d2 === b.d2 ? 0 : a.d2 < b.d2 ? -1 : 1) ||
+    (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+  );
+  return keyed.map((k) => k.id);
+}
 
 export function dynamicArenaTierConfig(
   difficulty: BotDifficulty,
@@ -113,7 +183,7 @@ export function topTwoAverageKd(
       best2 = kd;
     }
   }
-  return players.length === 1 ? best1 : (best1 + best2) / 2;
+  return players.length === 1 ? best1 : (best1 + best2) * 0.5;
 }
 
 /**
@@ -185,11 +255,28 @@ export function computeTeamObjectiveDirectives(
   teamBotIds: readonly string[],
   doorDiff: number,
   difficulty: BotDifficulty,
+  /**
+   * Preferred capture order (e.g. {@link rankCaptureCandidates}). Capture
+   * goes to the first ids here; the rest keep id order for defend / slay.
+   * Omitted → plain id order.
+   */
+  captureOrder?: readonly string[],
 ): Map<string, BotObjectiveDirective> {
   const out = new Map<string, BotObjectiveDirective>();
   if (teamBotIds.length === 0) return out;
 
-  const sorted = [...teamBotIds].sort();
+  let sorted = [...teamBotIds].sort();
+  if (captureOrder && captureOrder.length > 0) {
+    const members = new Set(sorted);
+    const take = captureBotCountFor(sorted.length, doorDiff, difficulty);
+    const head: string[] = [];
+    for (const id of captureOrder) {
+      if (head.length >= take) break;
+      if (members.has(id) && !head.includes(id)) head.push(id);
+    }
+    const headSet = new Set(head);
+    sorted = [...head, ...sorted.filter((id) => !headSet.has(id))];
+  }
   const n = sorted.length;
   const captureCount = captureBotCountFor(n, doorDiff, difficulty);
   const remaining = n - captureCount;
@@ -211,7 +298,7 @@ export function computeTeamObjectiveDirectives(
       defendCount = remaining;
     } else {
       // Balanced 50/50 split (first extra defends, second slays, etc.).
-      defendCount = Math.ceil(remaining / 2);
+      defendCount = Math.ceil(remaining * 0.5);
     }
   }
 
@@ -239,6 +326,8 @@ export class DynamicArenaDirector {
   private lastScoreA = Number.NaN;
   private lastScoreB = Number.NaN;
   private lastRosterKey = "";
+  private doorPush: { A: number; B: number } = { A: 0, B: 0 };
+  private lastDoorsOpen = false;
 
   constructor(difficulty: BotDifficulty) {
     this.difficulty = difficulty;
@@ -268,6 +357,13 @@ export class DynamicArenaDirector {
     this.lastScoreA = Number.NaN;
     this.lastScoreB = Number.NaN;
     this.lastRosterKey = "";
+    this.doorPush = { A: 0, B: 0 };
+    this.lastDoorsOpen = false;
+  }
+
+  /** Trailing door push (0..1) for a team; 0 when level or leading. */
+  public getDoorPush(team: TeamId): number {
+    return this.doorPush[team];
   }
 
   public getCombatDelayMs(team: TeamId): number {
@@ -287,8 +383,13 @@ export class DynamicArenaDirector {
     players: readonly DynamicArenaPlayerInput[],
     teamScores: Readonly<{ A: number; B: number }>,
     matchOver: boolean,
+    opts: DynamicArenaTickOptions = {},
   ): void {
     if (matchOver) return;
+    const doorsOpen = opts.doorsOpen === true;
+    // Re-rank capture picks when the doors drop: whoever is nearest now runs.
+    const doorsOpened = doorsOpen && !this.lastDoorsOpen;
+    this.lastDoorsOpen = doorsOpen;
 
     const liveBotIds = new Set<string>();
     const teamBotsA: string[] = [];
@@ -325,6 +426,7 @@ export class DynamicArenaDirector {
     teamBotsB.sort();
     const rosterKey = `A:${teamBotsA.join(",")}|B:${teamBotsB.join(",")}`;
     if (
+      doorsOpened ||
       rosterKey !== this.lastRosterKey ||
       teamScores.A !== this.lastScoreA ||
       teamScores.B !== this.lastScoreB
@@ -333,16 +435,27 @@ export class DynamicArenaDirector {
       this.lastScoreA = teamScores.A;
       this.lastScoreB = teamScores.B;
       this.directivesByBot.clear();
+      this.doorPush.A = doorPushFor(teamScores.A - teamScores.B, this.difficulty);
+      this.doorPush.B = doorPushFor(teamScores.B - teamScores.A, this.difficulty);
+      const botsA: DynamicArenaPlayerInput[] = [];
+      const botsB: DynamicArenaPlayerInput[] = [];
+      for (let i = 0; i < players.length; i += 1) {
+        const p = players[i]!;
+        if (!p.isBot || p.isAgent) continue;
+        (p.team === "A" ? botsA : botsB).push(p);
+      }
       const mapA = computeTeamObjectiveDirectives(
         teamBotsA,
         teamScores.A - teamScores.B,
         this.difficulty,
+        rankCaptureCandidates(botsA, opts.enemyDoors?.A),
       );
       for (const [id, dir] of mapA) this.directivesByBot.set(id, dir);
       const mapB = computeTeamObjectiveDirectives(
         teamBotsB,
         teamScores.B - teamScores.A,
         this.difficulty,
+        rankCaptureCandidates(botsB, opts.enemyDoors?.B),
       );
       for (const [id, dir] of mapB) this.directivesByBot.set(id, dir);
     }

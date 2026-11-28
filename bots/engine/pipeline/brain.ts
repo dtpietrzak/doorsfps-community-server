@@ -635,7 +635,7 @@ export class BotBrain {
       combatDelayMs > 0 &&
       (this.lookAim.fittsASec > 0 || this.lookAim.fittsBSec > 0)
     ) {
-      const aimSlowScale = clamp(1 + combatDelayMs / 550, 1, 2.6);
+      const aimSlowScale = clamp(1 + combatDelayMs * (1 / 550), 1, 2.6);
       effectiveLookAim = {
         fittsASec: this.lookAim.fittsASec * aimSlowScale,
         fittsBSec: this.lookAim.fittsBSec * aimSlowScale,

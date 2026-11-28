@@ -11,12 +11,13 @@
 import { SIM_TICKS_PER_BOT_TICK } from "../types.ts";
 import type { BotApplyInterp, BotLookSample } from "../types.ts";
 import type { ReadyAction } from "./types.ts";
+import { PI, TWO_PI } from "../../shared/math/index.ts";
 
 /** Signed shortest yaw delta in (−π, π]. */
 export function yawSignedDelta(from: number, to: number): number {
   let d = to - from;
-  while (d > Math.PI) d -= Math.PI * 2;
-  while (d <= -Math.PI) d += Math.PI * 2;
+  while (d > PI) d -= TWO_PI;
+  while (d <= -PI) d += TWO_PI;
   return d;
 }
 

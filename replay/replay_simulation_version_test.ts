@@ -35,12 +35,13 @@ function rewrite(
 }
 
 Deno.test("17.2 stamp: the writer version is its own constant", async () => {
-  assertEquals(SIMULATION_VERSION, 2);
+  assertEquals(SIMULATION_VERSION, 3);
   assertEquals(
     REPLAY_SIMULATION_VERSIONS.find((row) => row.role === "current")?.version,
     SIMULATION_VERSION,
   );
   assertEquals(classifyReplaySimulationVersion(1), "previous");
+  assertEquals(classifyReplaySimulationVersion(2), "previous");
   assertEquals(replayFormatBumpOwner("simulation").stamp, "SIMULATION_VERSION");
   assertEquals(replayFormatBumpOwner("simulation").bumpsFormatVersion, false);
 

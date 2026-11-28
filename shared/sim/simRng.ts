@@ -56,7 +56,7 @@ export function createSimRng(seed: number): SimRngStream {
     next ^= next << 5;
     next >>>= 0;
     state = next;
-    return next / 4_294_967_296;
+    return next * 2.3283064365386963e-10;
   };
   draw.getState = (): number => state >>> 0;
   draw.setState = (n: number): void => {

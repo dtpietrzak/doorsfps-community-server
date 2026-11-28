@@ -26,7 +26,7 @@ import type {
   ThinkContext,
   ThinkStep,
 } from "../../pipeline/types.ts";
-import type { BotBrainState } from "../../types.ts";
+import { type BotBrainState, capturePush } from "../../types.ts";
 
 export type NavModeStepOpts = {
   agentAggression: number;
@@ -59,8 +59,16 @@ export function shouldForceNavMode(
   doorsOpen: boolean,
   tick?: number,
   objectiveDirective?: import("../../model/index.ts").BotObjectiveDirective,
+  pushCapture = false,
 ): boolean {
   if (!bag.huntDoorsSampled) return true;
+  // Trailing capture bot still hunting through a closed phase → go camp.
+  if (
+    pushCapture && !doorsOpen && bag.huntActive &&
+    !(typeof tick === "number" && isDwellForceHuntActive(bag, tick))
+  ) {
+    return true;
+  }
   if (bag.huntDoorsOpen !== doorsOpen) return true;
   if (
     typeof tick === "number" &&
@@ -92,7 +100,14 @@ export function runNavModeStep(
       const doorsOpen = Boolean(ctx.view.doorsOpen);
       const tick = ctx.view.tick;
       const objectiveDirective = ctx.view.objectiveDirective;
-      const force = shouldForceNavMode(bag, doorsOpen, tick, objectiveDirective);
+      const pushCapture = capturePush(ctx.view) > 0;
+      const force = shouldForceNavMode(
+        bag,
+        doorsOpen,
+        tick,
+        objectiveDirective,
+        pushCapture,
+      );
       if (
         !shouldRunCadencedStep("navMode", tick, me.id, { force })
       ) {
@@ -106,6 +121,7 @@ export function runNavModeStep(
         rng,
         tick,
         objectiveDirective,
+        pushCapture,
       });
       return { out };
 }

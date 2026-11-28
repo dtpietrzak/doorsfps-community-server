@@ -59,6 +59,8 @@ export type ZombotsMatchTuning = {
     readonly grandpaEvery: number;
     readonly grandpaSpeedMultiplier: number;
     readonly grandpaHealthMultiplier: number;
+    readonly tallEvery: number;
+    readonly tallWalkSpeedMultiplier: number;
   };
 };
 
@@ -418,10 +420,15 @@ export class ZombotsMatch {
     const grandpaEvery = this.tuning.zombie.grandpaEvery;
     const isGrandpa = !isMini && grandpaEvery > 0 &&
       this.spawnSeq % grandpaEvery === 0;
+    const tallEvery = this.tuning.zombie.tallEvery;
+    const isTall = !isMini && !isGrandpa && tallEvery > 0 &&
+      this.spawnSeq % tallEvery === 0;
     const speedScale = isMini
       ? plan.speedScale * this.tuning.zombie.miniSpeedMultiplier
       : isGrandpa
       ? plan.speedScale * this.tuning.zombie.grandpaSpeedMultiplier
+      : isTall
+      ? plan.speedScale * this.tuning.zombie.tallWalkSpeedMultiplier
       : plan.speedScale;
     const health = isGrandpa
       ? round(plan.health * this.tuning.zombie.grandpaHealthMultiplier)
@@ -436,6 +443,7 @@ export class ZombotsMatch {
       speedScale,
       modelScale,
       grandpa: isGrandpa,
+      tall: isTall,
       meleeDamage: plan.meleeDamage,
     });
     return true;

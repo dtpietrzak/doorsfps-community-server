@@ -80,14 +80,17 @@ export function wallMountOffset(
 ): { s: number; len: number } | null {
   const dx = b.x - a.x;
   const dz = b.z - a.z;
-  const len = Math.hypot(dx, dz);
+  const len = Math.sqrt(dx * dx + dz * dz);
   if (len < 1e-6) return null;
-  const ux = dx / len;
-  const uz = dz / len;
+  const invLen = 1 / len;
+  const ux = dx * invLen;
+  const uz = dz * invLen;
   const s = (center.x - a.x) * ux + (center.z - a.z) * uz;
   const px = a.x + ux * s;
   const pz = a.z + uz * s;
-  if (Math.hypot(center.x - px, center.z - pz) > CENTER_ON_WALL) return null;
+  const offX = center.x - px;
+  const offZ = center.z - pz;
+  if (offX * offX + offZ * offZ > CENTER_ON_WALL * CENTER_ON_WALL) return null;
   return { s, len };
 }
 
@@ -103,9 +106,10 @@ export function slidingDoorPlacement(
   const mount = wallMountOffset(a, b, center);
   if (!mount) return null;
   const { s, len } = mount;
-  const ux = (b.x - a.x) / len;
-  const uz = (b.z - a.z) / len;
-  const half = SLIDING_DOOR_WIDTH / 2;
+  const invLen = 1 / len;
+  const ux = (b.x - a.x) * invLen;
+  const uz = (b.z - a.z) * invLen;
+  const half = SLIDING_DOOR_WIDTH * 0.5;
   if (s - half < -1e-3 || s + half > len + 1e-3) return null;
   const at = (t: number) => ({ x: a.x + ux * t, z: a.z + uz * t });
   return {
@@ -145,7 +149,9 @@ export function nearestClosedSlidingDoor(
   let bestDist = reach;
   for (const door of doors) {
     if (door.open) continue;
-    const dist = Math.hypot(door.x - x, door.z - z);
+    const ddx = door.x - x;
+    const ddz = door.z - z;
+    const dist = Math.sqrt(ddx * ddx + ddz * ddz);
     if (dist <= bestDist) {
       best = door;
       bestDist = dist;

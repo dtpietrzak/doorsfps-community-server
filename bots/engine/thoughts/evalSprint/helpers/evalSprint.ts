@@ -159,3 +159,101 @@ export function stepEvalOpenSprint(input: StepEvalOpenSprintInput): boolean {
     input.openDist ?? SPRINT_OPEN_DIST,
   );
 }
+
+// ── Door rush (doors open) ─────────────────────────────────────────────────
+
+/**
+ * Doors-open rush: added to the tier `sprintChance` for the once-per-window
+ * roll (Easy 0.22 → 0.67, Medium 0.42 → 0.87, Hard 0.65 → 1). Humans sprint
+ * nearly every door window; the old open-lane roll (0.75× chance, top 42% of
+ * the bar, re-rolled on every stamina dip) left bots jogging at the door.
+ */
+export const DOOR_RUSH_SPRINT_CHANCE_BONUS = 0.45;
+
+/**
+ * Rush sprints the bar down to this fraction (a jump's worth stays in
+ * reserve), then walks until {@link DOOR_RUSH_RESUME_STAMINA_FRAC}.
+ */
+export const DOOR_RUSH_MIN_STAMINA_FRAC = 0.12;
+
+/** Winded rusher resumes sprinting once the bar refills to this fraction. */
+export const DOOR_RUSH_RESUME_STAMINA_FRAC = 0.45;
+
+/** Rush floor / resume at full trailing door push (see §3.4 in the notes). */
+export const DOOR_PUSH_RUSH_MIN_STAMINA_FRAC = 0.04;
+export const DOOR_PUSH_RUSH_RESUME_STAMINA_FRAC = 0.3;
+
+function clampPush(push: number | undefined): number {
+  if (typeof push !== "number" || !Number.isFinite(push) || push <= 0) return 0;
+  return push >= 1 ? 1 : push;
+}
+
+/**
+ * Per-window rush roll. `push` (trailing capture bot, 0..1) closes the gap
+ * to 1: `c + push × (1 − c)`.
+ */
+export function doorRushSprintChance(sprintChance: number, push = 0): number {
+  const base = sprintChance + DOOR_RUSH_SPRINT_CHANCE_BONUS;
+  const c = base >= 1 ? 1 : base <= 0 ? 0 : base;
+  const p = clampPush(push);
+  return c + p * (1 - c);
+}
+
+/** Rush stamina floor / resume fractions, lerped by trailing push. */
+export function doorRushStaminaFracs(
+  push = 0,
+): { min: number; resume: number } {
+  const p = clampPush(push);
+  return {
+    min: DOOR_RUSH_MIN_STAMINA_FRAC +
+      p * (DOOR_PUSH_RUSH_MIN_STAMINA_FRAC - DOOR_RUSH_MIN_STAMINA_FRAC),
+    resume: DOOR_RUSH_RESUME_STAMINA_FRAC +
+      p * (DOOR_PUSH_RUSH_RESUME_STAMINA_FRAC - DOOR_RUSH_RESUME_STAMINA_FRAC),
+  };
+}
+
+export type StepEvalDoorRushInput = DoorRunInput & {
+  collision: MapCollision;
+  sprintStamina: number;
+  /** Winded latch from the previous think (hit the floor, still refilling). */
+  winded: boolean;
+  /** Trailing capture push (0..1): lower floor / resume. */
+  push?: number;
+  maxSprintStamina?: number;
+  openDist?: number;
+};
+
+/**
+ * Doors-open rush. Caller gates on doors open + path mode (no hunt / camp).
+ * Returns whether the lane wants a sprint and the next winded latch.
+ * Unlike open-lane sprint it drains the bar nearly empty, with hysteresis so
+ * a winded bot walks a beat instead of flickering sprint on every regen tick.
+ */
+export function stepEvalDoorRushSprint(
+  input: StepEvalDoorRushInput,
+): { want: boolean; winded: boolean } {
+  const max = input.maxSprintStamina ?? SPRINT_DURATION_S;
+  const stamina = input.sprintStamina;
+  if (!(max > 0) || !Number.isFinite(stamina)) {
+    return { want: false, winded: input.winded };
+  }
+  const fracs = doorRushStaminaFracs(input.push);
+  let winded = input.winded;
+  if (winded) {
+    if (stamina >= max * fracs.resume) winded = false;
+  } else if (stamina <= max * fracs.min) {
+    winded = true;
+  }
+  if (winded) return { want: false, winded };
+  if (!isMoveTowardEnemyDoorLenient(input)) return { want: false, winded };
+  const runYaw = resolveMoveYaw(input);
+  if (runYaw === null) return { want: false, winded };
+  const open = hasOpenSpaceAhead(
+    input.collision,
+    input.x,
+    input.z,
+    runYaw,
+    input.openDist ?? SPRINT_OPEN_DIST,
+  );
+  return { want: open, winded };
+}

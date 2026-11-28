@@ -303,6 +303,7 @@ export class PersistentBotThinkEngine {
         const combatDelayMs = self.team === "A"
           ? frame.combatDelayMsA
           : frame.combatDelayMsB;
+        const doorPush = self.team === "A" ? frame.doorPushA : frame.doorPushB;
         let objectiveDirective = undefined;
         for (let p = 0; p < frame.players.length; p++) {
           const snap = frame.players[p]!;
@@ -330,6 +331,7 @@ export class PersistentBotThinkEngine {
           zombieLure: frame.zombieLure ?? null,
           combatDelayMs,
           objectiveDirective,
+          doorPush,
         }, slot.state));
       }
       decisions.push({

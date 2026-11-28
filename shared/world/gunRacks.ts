@@ -83,7 +83,7 @@ export function normalizeGunRacks(map: {
   for (const wall of map.walls) walls.set(wall.id, wall);
   const seen = new Set<string>();
   const out: GunRack[] = [];
-  const half = GUN_RACK_WIDTH / 2;
+  const half = GUN_RACK_WIDTH * 0.5;
   for (const item of map.gunRacks as unknown[]) {
     if (out.length >= MAX_GUN_RACKS) break;
     if (!item || typeof item !== "object") continue;

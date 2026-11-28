@@ -54,9 +54,10 @@ function wallAxis(
 ): { ux: number; uz: number; len: number } | null {
   const dx = b.x - a.x;
   const dz = b.z - a.z;
-  const len = Math.hypot(dx, dz);
+  const len = Math.sqrt(dx * dx + dz * dz);
   if (len < 1e-6) return null;
-  return { ux: dx / len, uz: dz / len, len };
+  const invLen = 1 / len;
+  return { ux: dx * invLen, uz: dz * invLen, len };
 }
 
 function mergeIntervals(gaps: OpeningInterval[]): OpeningInterval[] {
@@ -85,7 +86,9 @@ function openingIntervals(
     const s = (center.x - a.x) * ux + (center.z - a.z) * uz;
     const px = a.x + ux * s;
     const pz = a.z + uz * s;
-    if (Math.hypot(center.x - px, center.z - pz) > CENTER_ON_WALL) continue;
+    const offX = center.x - px;
+    const offZ = center.z - pz;
+    if (offX * offX + offZ * offZ > CENTER_ON_WALL * CENTER_ON_WALL) continue;
     const raw0 = s - halfWidth;
     const raw1 = s + halfWidth;
     if (raw1 <= 1e-4 || raw0 >= len - 1e-4) continue;
@@ -132,7 +135,7 @@ export function cutWallOpenings(
 
   const axis = wallAxis(a, b);
   if (!axis) return [whole];
-  const merged = openingIntervals(a, axis, centers, WINDOW_WIDTH / 2);
+  const merged = openingIntervals(a, axis, centers, WINDOW_WIDTH * 0.5);
   if (merged.length === 0) return [whole];
   const { ux, uz, len } = axis;
 
@@ -180,7 +183,7 @@ function subtractDoorGaps(
   if (centers.length === 0 || spans.length === 0) return spans.slice();
   const axis = wallAxis(originA, originB);
   if (!axis) return spans.slice();
-  const merged = openingIntervals(originA, axis, centers, SLIDING_DOOR_WIDTH / 2);
+  const merged = openingIntervals(originA, axis, centers, SLIDING_DOOR_WIDTH * 0.5);
   if (merged.length === 0) return spans.slice();
   const { ux, uz } = axis;
   const at = (s: number): WindowVec2 => ({
@@ -318,9 +321,9 @@ export function windowIdAtSpan(
   windows: readonly { id: string; wallId: string; center: WindowVec2 }[] | undefined,
 ): string | null {
   if (!windows) return null;
-  const mx = (a.x + b.x) / 2;
-  const mz = (a.z + b.z) / 2;
-  const limit = WINDOW_WIDTH / 2;
+  const mx = (a.x + b.x) * 0.5;
+  const mz = (a.z + b.z) * 0.5;
+  const limit = WINDOW_WIDTH * 0.5;
   let best: string | null = null;
   let bestD = limit * limit;
   for (let i = 0; i < windows.length; i++) {
@@ -421,13 +424,13 @@ export function interiorOpeningGaps(
         wall.a,
         axis,
         windowCentersOnWall(wall.id, windows),
-        WINDOW_WIDTH / 2,
+        WINDOW_WIDTH * 0.5,
       ),
       ...openingIntervals(
         wall.a,
         axis,
         doorCentersOnWall(wall.id, gapDoors),
-        SLIDING_DOOR_WIDTH / 2,
+        SLIDING_DOOR_WIDTH * 0.5,
       ),
     ]);
     const { ux, uz } = axis;

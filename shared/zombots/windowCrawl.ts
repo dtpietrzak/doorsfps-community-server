@@ -270,9 +270,10 @@ export function sampleWindowCrawlPose(
   // Unit inward vector (center → end).
   const toEndX = crawl.endX - crawl.centerX;
   const toEndZ = crawl.endZ - crawl.centerZ;
-  const endLen = Math.hypot(toEndX, toEndZ);
-  const inX = endLen > 1e-6 ? toEndX / endLen : 0;
-  const inZ = endLen > 1e-6 ? toEndZ / endLen : -1;
+  const endLen = Math.sqrt(toEndX * toEndX + toEndZ * toEndZ);
+  const invEndLen = endLen > 1e-6 ? 1 / endLen : 0;
+  const inX = endLen > 1e-6 ? toEndX * invEndLen : 0;
+  const inZ = endLen > 1e-6 ? toEndZ * invEndLen : -1;
 
   // Outside sill-grab point (+0.58 m outside wall) and inside drop-off point (-0.58 m inside wall).
   const sillHold = 0.58;

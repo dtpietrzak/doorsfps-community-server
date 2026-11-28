@@ -7,6 +7,7 @@
 
 import { TICK_HZ } from "../protocol/network.ts";
 import { DOOR_APPROACH_DIST } from "./helpers/nav.ts";
+import { PI, TWO_PI } from "../shared/math/index.ts";
 
 // ---------------------------------------------------------------------------
 // Thresholds (exported for tests / CLI tuning)
@@ -28,7 +29,7 @@ export const AUDIT_WINDOW_TICKS = Math.round(1.0 * TICK_HZ);
 export const AUDIT_THRASH_FLIPS = 10;
 
 /** Same-sign yaw accumulation for SPIN (≈ full turn). */
-export const AUDIT_SPIN_YAW = Math.PI * 2;
+export const AUDIT_SPIN_YAW = TWO_PI;
 
 /**
  * Wall-aim streak (~1.5s looking into slab while barely moving).
@@ -60,7 +61,7 @@ export const AUDIT_ORBIT_DIST_MIN = 1.0;
 export const AUDIT_ORBIT_DIST_MAX = 7.0;
 
 /** Pair orbit: relative bearing change in window (rad) — ~1.1 turns. */
-export const AUDIT_ORBIT_BEARING = Math.PI * 1.15;
+export const AUDIT_ORBIT_BEARING = PI * 1.15;
 
 /** Pair orbit: max COM travel in window (stay planted while spinning). */
 export const AUDIT_ORBIT_COM_MAX = 2.4;
@@ -101,8 +102,8 @@ export const AUDIT_DOOR_REFUSE_REACH = 4.0;
 
 export function wrapPi(a: number): number {
   let x = a;
-  while (x > Math.PI) x -= Math.PI * 2;
-  while (x < -Math.PI) x += Math.PI * 2;
+  while (x > PI) x -= TWO_PI;
+  while (x < -PI) x += TWO_PI;
   return x;
 }
 
@@ -338,7 +339,9 @@ export function advanceBotAudit(
   if (input.inOwnHalf) c.ticksInOwnHalf += 1;
   else c.ticksInEnemyHalf += 1;
 
-  const moved = Math.hypot(input.x - live.lastX, input.z - live.lastZ);
+  const moveDx = input.x - live.lastX;
+  const moveDz = input.z - live.lastZ;
+  const moved = Math.sqrt(moveDx * moveDx + moveDz * moveDz);
   const dyaw = yawDelta(live.lastYaw, input.yaw);
 
   // --- stuck ---
@@ -491,7 +494,9 @@ export function advanceOrbitPair(
   bx: number,
   bz: number,
 ): boolean {
-  const dist = Math.hypot(ax - bx, az - bz);
+  const abDx = ax - bx;
+  const abDz = az - bz;
+  const dist = Math.sqrt(abDx * abDx + abDz * abDz);
   if (dist < AUDIT_ORBIT_DIST_MIN || dist > AUDIT_ORBIT_DIST_MAX) {
     state.windowTick = 0;
     state.bearingAccum = 0;
@@ -500,11 +505,13 @@ export function advanceOrbitPair(
     return false;
   }
   const bearing = Math.atan2(bx - ax, bz - az);
-  const comX = (ax + bx) / 2;
-  const comZ = (az + bz) / 2;
+  const comX = (ax + bx) * 0.5;
+  const comZ = (az + bz) * 0.5;
   if (state.lastBearing !== null) {
     state.bearingAccum += Math.abs(yawDelta(state.lastBearing, bearing));
-    state.comTravel += Math.hypot(comX - state.lastComX, comZ - state.lastComZ);
+    const comDx = comX - state.lastComX;
+    const comDz = comZ - state.lastComZ;
+    state.comTravel += Math.sqrt(comDx * comDx + comDz * comDz);
   }
   state.lastBearing = bearing;
   state.lastComX = comX;
@@ -592,9 +599,10 @@ export function createCloseContactPairState(): CloseContactPairState {
 }
 
 function unitOrForward(dx: number, dz: number): { x: number; z: number } {
-  const len = Math.hypot(dx, dz);
+  const len = Math.sqrt(dx * dx + dz * dz);
   if (len < 1e-4) return { x: 0, z: 1 };
-  return { x: dx / len, z: dz / len };
+  const inv = 1 / len;
+  return { x: dx * inv, z: dz * inv };
 }
 
 /**
@@ -629,7 +637,9 @@ export function advanceCloseContactPair(
     return false;
   }
 
-  const dist = Math.hypot(ax - bx, az - bz);
+  const abDx = ax - bx;
+  const abDz = az - bz;
+  const dist = Math.sqrt(abDx * abDx + abDz * abDz);
   const dAx = state.hasLast ? ax - state.lastAx : 0;
   const dAz = state.hasLast ? az - state.lastAz : 0;
   const dBx = state.hasLast ? bx - state.lastBx : 0;
@@ -637,8 +647,8 @@ export function advanceCloseContactPair(
 
   let fired = false;
 
-  const comX = (ax + bx) / 2;
-  const comZ = (az + bz) / 2;
+  const comX = (ax + bx) * 0.5;
+  const comZ = (az + bz) * 0.5;
 
   if (dist <= AUDIT_CLOSE_DIST) {
     if (!state.inContact) {
@@ -649,13 +659,15 @@ export function advanceCloseContactPair(
       state.lastComX = comX;
       state.lastComZ = comZ;
       // Prefer live velocity; fall back to line through the other body.
+      const aMoving = dAx * dAx + dAz * dAz > 0.01 * 0.01;
+      const bMoving = dBx * dBx + dBz * dBz > 0.01 * 0.01;
       const aMove = unitOrForward(
-        Math.hypot(dAx, dAz) > 0.01 ? dAx : (bx - ax),
-        Math.hypot(dAx, dAz) > 0.01 ? dAz : (bz - az),
+        aMoving ? dAx : (bx - ax),
+        aMoving ? dAz : (bz - az),
       );
       const bMove = unitOrForward(
-        Math.hypot(dBx, dBz) > 0.01 ? dBx : (ax - bx),
-        Math.hypot(dBx, dBz) > 0.01 ? dBz : (az - bz),
+        bMoving ? dBx : (ax - bx),
+        bMoving ? dBz : (az - bz),
       );
       state.axisAx = aMove.x;
       state.axisAz = aMove.z;
@@ -664,10 +676,9 @@ export function advanceCloseContactPair(
       state.sA0 = (bx - ax) * state.axisAx + (bz - az) * state.axisAz;
       state.sB0 = (ax - bx) * state.axisBx + (az - bz) * state.axisBz;
     } else {
-      state.comTravel += Math.hypot(
-        comX - state.lastComX,
-        comZ - state.lastComZ,
-      );
+      const comDx = comX - state.lastComX;
+      const comDz = comZ - state.lastComZ;
+      state.comTravel += Math.sqrt(comDx * comDx + comDz * comDz);
       state.lastComX = comX;
       state.lastComZ = comZ;
     }
@@ -1006,7 +1017,7 @@ export function teamLevelIssues(
   }
   // Require repeated stuck events so one 2s plant mid-fight doesn't fail the map.
   const stuckBots = bots.filter((b) => b.stuckEvents >= 2).length;
-  if (bots.length >= 4 && stuckBots >= Math.ceil(bots.length / 2)) {
+  if (bots.length >= 4 && stuckBots >= Math.ceil(bots.length * 0.5)) {
     out.push({
       code: "MAP-WIDE-STUCK",
       severity: "high",

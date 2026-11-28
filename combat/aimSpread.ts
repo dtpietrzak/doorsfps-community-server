@@ -16,6 +16,7 @@ import {
   WEAPON_RIFLE,
 } from "../shared/sim/weapons.ts";
 import { directionFromYawPitch, normalize, type Vec3 } from "./hitscan.ts";
+import { RAD_PER_DEG, TWO_PI } from "../shared/math/index.ts";
 
 export type { AimSpreadStance };
 
@@ -56,7 +57,7 @@ export function aimSpreadRad(
 ): number {
   if (opts?.perfectAccuracy) return 0;
   const deg = aimSpreadDegForWeapon(weaponId, aimSpreadStance(state));
-  return (deg * Math.PI) / 180;
+  return deg * RAD_PER_DEG;
 }
 
 export function crosshairSpreadMult(
@@ -93,27 +94,28 @@ export function applyAimSpread(
     y: 0,
     z: -dir.x,
   };
-  let rLen = Math.hypot(right.x, right.z);
+  let rLen = Math.sqrt(right.x * right.x + right.z * right.z);
   if (rLen < 1e-6) {
     // Looking straight up/down — pick an arbitrary horizontal right.
     right = { x: 1, y: 0, z: 0 };
     rLen = 1;
   }
-  right = { x: right.x / rLen, y: 0, z: right.z / rLen };
+  const invRLen = 1 / rLen;
+  right = { x: right.x * invRLen, y: 0, z: right.z * invRLen };
 
   const up: Vec3 = {
     x: right.y * dir.z - right.z * dir.y,
     y: right.z * dir.x - right.x * dir.z,
     z: right.x * dir.y - right.y * dir.x,
   };
-  const upLen = Math.hypot(up.x, up.y, up.z) || 1;
+  const upLen = Math.sqrt(up.x * up.x + up.y * up.y + up.z * up.z) || 1;
   up.x /= upLen;
   up.y /= upLen;
   up.z /= upLen;
 
   // Uniform in disc: radius uses sqrt so density is even on the cone base.
   const angle = maxAngleRad * Math.sqrt(rng());
-  const theta = rng() * Math.PI * 2;
+  const theta = rng() * TWO_PI;
   const sinA = Math.sin(angle);
   const cosA = Math.cos(angle);
   const ox = Math.cos(theta) * sinA;

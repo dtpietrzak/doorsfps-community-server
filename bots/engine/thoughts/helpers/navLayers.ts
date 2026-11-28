@@ -248,6 +248,11 @@ export type StepNavModeArgs = {
   tick?: number;
   /** Optional arena dynamic objective role (`capture` | `defend` | `slay`). */
   objectiveDirective?: BotObjectiveDirective;
+  /**
+   * Trailing capture bot (`capturePush > 0`): camp the enemy door through the
+   * closed phase instead of hunting, so it is on the lip when doors drop.
+   */
+  pushCapture?: boolean;
 };
 
 /**
@@ -264,6 +269,7 @@ export function stepNavMode(args: StepNavModeArgs): NavModeDecision {
     rng,
     tick,
     objectiveDirective,
+    pushCapture,
   } = args;
   const prevDoorsOpen = bag.huntDoorsOpen;
   // Dwell-break after long camp plant: temporarily hunt instead of re-plant.
@@ -272,7 +278,9 @@ export function stepNavMode(args: StepNavModeArgs): NavModeDecision {
   const defendOwnDoor = !isGreyAgent && objectiveDirective === "defend";
   const roamSlay = !isGreyAgent && objectiveDirective === "slay";
   const preferCamp = !isGreyAgent && !forceHunt &&
-    (defendOwnDoor || (!roamSlay && wantsEnemyDoorCamp(agentAggression)));
+    (defendOwnDoor ||
+      (!roamSlay &&
+        (pushCapture === true || wantsEnemyDoorCamp(agentAggression))));
   const canClosedMode = !doorsOpen || defendOwnDoor || roamSlay;
 
   let huntActive = Boolean(bag.huntActive) && canClosedMode && !preferCamp;
@@ -341,6 +349,11 @@ export function stepNavMode(args: StepNavModeArgs): NavModeDecision {
   if (defendOwnDoor && !forceHunt && !doorCampActive) {
     enterClosedMode();
   } else if (roamSlay && !huntActive) {
+    enterClosedMode();
+  } else if (
+    pushCapture === true && preferCamp && !doorsOpen && !doorCampActive
+  ) {
+    // Score fell behind mid-closed-phase: leave the hunt and camp the door.
     enterClosedMode();
   }
 
@@ -416,6 +429,8 @@ export type StepNavGoalArgs = {
   teammateCamps?: readonly { x: number; z: number }[];
   /** Optional arena dynamic objective role (`capture` | `defend` | `slay`). */
   objectiveDirective?: BotObjectiveDirective;
+  /** Closed-phase lip window (s); omit → {@link DOOR_LIP_CAMP_SEC}. */
+  lipCampSec?: number;
 };
 
 function nearestEnemyPlayerGoal(
@@ -466,6 +481,7 @@ export function stepNavGoal(args: StepNavGoalArgs): NavGoalDecision {
     doorChangeTick,
     teammateCamps,
     objectiveDirective,
+    lipCampSec,
   } = args;
   const enemyDoor = enemyDoorOpt ?? enemyDoorTarget(map, team);
   const defendOwn = !isGreyAgent && objectiveDirective === "defend";
@@ -493,7 +509,7 @@ export function stepNavGoal(args: StepNavGoalArgs): NavGoalDecision {
     }
     const wantLip = defendOwn
       ? false
-      : wantsLipDoorCamp(doorAggression, tick, doorChangeTick);
+      : wantsLipDoorCamp(doorAggression, tick, doorChangeTick, lipCampSec);
     if (bag.doorCampWantLip !== wantLip) {
       bag.doorCampWantLip = wantLip;
       bag.doorCampPlantX = UNSET;

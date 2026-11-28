@@ -63,6 +63,18 @@ export const DOOR_CAMP_CLAIM_RADIUS = 4;
 /** Last this many seconds of the closed phase → walk onto the capture lip. */
 export const DOOR_LIP_CAMP_SEC = 3;
 
+/**
+ * Extra lip seconds at full trailing door push: the window grows to
+ * `DOOR_LIP_CAMP_SEC + push × DOOR_PUSH_LIP_EXTRA_SEC` (3 → 8 s).
+ */
+export const DOOR_PUSH_LIP_EXTRA_SEC = 5;
+
+/** Closed-phase lip window (s) for a capture push in 0..1. */
+export function lipCampSecForPush(push: number): number {
+  const p = Number.isFinite(push) ? Math.min(1, Math.max(0, push)) : 0;
+  return DOOR_LIP_CAMP_SEC + p * DOOR_PUSH_LIP_EXTRA_SEC;
+}
+
 /** doorAggression at/above this camps the lip even mid-close. */
 export const DOOR_LIP_CAMP_AGGRESSION = 0.75;
 
@@ -74,6 +86,8 @@ export function wantsLipDoorCamp(
   doorAggression: number | undefined,
   tick?: number,
   doorChangeTick?: number,
+  /** Lip window before doors open (s); default {@link DOOR_LIP_CAMP_SEC}. */
+  lipSec: number = DOOR_LIP_CAMP_SEC,
 ): boolean {
   if (
     typeof doorAggression === "number" &&
@@ -89,7 +103,10 @@ export function wantsLipDoorCamp(
     Number.isFinite(doorChangeTick)
   ) {
     const remain = doorChangeTick - tick;
-    return remain >= 0 && remain <= DOOR_LIP_CAMP_SEC * TICK_HZ;
+    const sec = Number.isFinite(lipSec) && lipSec > 0
+      ? lipSec
+      : DOOR_LIP_CAMP_SEC;
+    return remain >= 0 && remain <= sec * TICK_HZ;
   }
   return false;
 }

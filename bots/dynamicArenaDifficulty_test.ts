@@ -16,11 +16,13 @@ import {
   captureBotCountFor,
   computePlayerKd,
   computeTeamObjectiveDirectives,
+  doorPushFor,
   DYNAMIC_ARENA_TIER_CONFIGS,
   DynamicArenaDirector,
+  type DynamicArenaPlayerInput,
+  rankCaptureCandidates,
   stepCombatDelayMs,
   topTwoAverageKd,
-  type DynamicArenaPlayerInput,
 } from "./dynamicArenaDifficulty.ts";
 
 function makePlayer(
@@ -152,7 +154,10 @@ Deno.test("objective allocation keeps >= 1 capture bot and shifts with door defi
 
   // Terminal leading by +1 still keeps 2 bots on capture (less adaptive)
   const hardLead1 = computeTeamObjectiveDirectives(bots, 1, "hard");
-  assertEquals([...hardLead1.values()].filter((d) => d === "capture").length, 2);
+  assertEquals(
+    [...hardLead1.values()].filter((d) => d === "capture").length,
+    2,
+  );
 
   // Midway trailing by -2 sends all 4 bots to capture
   const medBehind = computeTeamObjectiveDirectives(bots, -2, "medium");
@@ -175,6 +180,8 @@ Deno.test("pipeline wire codec round-trips combatDelayMsA/B and objectiveDirecti
     teamScoreB: 1,
     combatDelayMsA: 180,
     combatDelayMsB: 45,
+    doorPushA: 0.39,
+    doorPushB: 0,
     players: [
       {
         id: "bot:1",
@@ -249,6 +256,8 @@ Deno.test("pipeline wire codec round-trips combatDelayMsA/B and objectiveDirecti
   if (decoded.type === "pipeline-think-batch") {
     assertEquals(decoded.input.frame.combatDelayMsA, 180);
     assertEquals(decoded.input.frame.combatDelayMsB, 45);
+    assertEquals(decoded.input.frame.doorPushA, 0.39);
+    assertEquals(decoded.input.frame.doorPushB, 0);
     assertEquals(decoded.input.frame.players[0]?.objectiveDirective, "defend");
     assertEquals(decoded.input.frame.players[1]?.objectiveDirective, "slay");
   }
@@ -341,4 +350,127 @@ Deno.test("navMode and navGoal honor defend (own door) and slay (roam) while doo
     objectiveDirective: "capture",
   });
   assertEquals(capMode.mode, "path");
+});
+
+Deno.test("doorPushFor scales tier strength by door deficit", () => {
+  assertEquals(doorPushFor(0, "hard"), 0);
+  assertEquals(doorPushFor(2, "hard"), 0);
+  assertEquals(doorPushFor(-1, "hard"), 0.6);
+  assertEquals(doorPushFor(-3, "hard"), 1);
+  assertEquals(doorPushFor(-2, "medium"), 0.65);
+  assertEquals(doorPushFor(-2, "easy"), 0.3);
+  assertEquals(doorPushFor(-1, "easy") < doorPushFor(-1, "medium"), true);
+});
+
+Deno.test("rankCaptureCandidates: alive first, nearest the enemy door, then id", () => {
+  const door = { x: 0, z: 10 };
+  const ranked = rankCaptureCandidates([
+    makePlayer({ id: "far", isBot: true, alive: true, x: 0, z: -10 }),
+    makePlayer({ id: "dead", isBot: true, alive: false, x: 0, z: 9 }),
+    makePlayer({ id: "near", isBot: true, alive: true, x: 0, z: 8 }),
+    makePlayer({ id: "noPose", isBot: true }),
+  ], door);
+  assertEquals(ranked, ["near", "far", "noPose", "dead"]);
+  // No door → id order (alive still first).
+  assertEquals(
+    rankCaptureCandidates([
+      makePlayer({ id: "b", isBot: true }),
+      makePlayer({ id: "a", isBot: true }),
+    ], undefined),
+    ["a", "b"],
+  );
+});
+
+Deno.test("computeTeamObjectiveDirectives gives capture to captureOrder head", () => {
+  const bots = ["b1", "b2", "b3", "b4"];
+  // Breezeway +1: 1 capture. The nearest bot (b4) gets it; rest keep id order.
+  const out = computeTeamObjectiveDirectives(bots, 1, "easy", [
+    "b4",
+    "b2",
+    "b1",
+    "b3",
+  ]);
+  assertEquals(out.get("b4"), "capture");
+  assertEquals(out.get("b1"), "defend");
+  assertEquals(out.get("b2"), "slay");
+  assertEquals(out.get("b3"), "slay");
+});
+
+Deno.test("DynamicArenaDirector: doorPush per team and capture re-ranked when doors open", () => {
+  const director = new DynamicArenaDirector("hard");
+  const enemyDoors = { A: { x: 0, z: 10 }, B: { x: 0, z: -10 } };
+  const near = (z: number) => [
+    makePlayer({ id: "bA1", team: "A", isBot: true, alive: true, x: 0, z: -9 }),
+    makePlayer({ id: "bA2", team: "A", isBot: true, alive: true, x: 0, z }),
+    makePlayer({ id: "bA3", team: "A", isBot: true, alive: true, x: 0, z: -8 }),
+    makePlayer({ id: "hB1", team: "B", isBot: false }),
+  ];
+  // Hard +1 lead with 3 bots → floor(3 × 0.5) = 1 capture, so ranking shows.
+  director.onTick(near(-5), { A: 2, B: 1 }, false, {
+    doorsOpen: false,
+    enemyDoors,
+  });
+  assertEquals(director.getDoorPush("A"), 0);
+  assertEquals(director.getDirective("bA2"), "capture");
+  // bA3 moves nearest; no re-rank while doors stay closed and score holds.
+  const moved = near(-5);
+  moved[2] = { ...moved[2]!, z: 9 };
+  director.onTick(moved, { A: 2, B: 1 }, false, {
+    doorsOpen: false,
+    enemyDoors,
+  });
+  assertEquals(director.getDirective("bA2"), "capture");
+  // Doors drop → re-rank: bA3 is now the capturer.
+  director.onTick(moved, { A: 2, B: 1 }, false, {
+    doorsOpen: true,
+    enemyDoors,
+  });
+  assertEquals(director.getDirective("bA3"), "capture");
+  assertEquals(director.getDirective("bA2") === "capture", false);
+  // Team A falls behind → push on A only.
+  director.onTick(moved, { A: 2, B: 4 }, false, {
+    doorsOpen: true,
+    enemyDoors,
+  });
+  assertEquals(director.getDoorPush("A"), 1);
+  assertEquals(director.getDoorPush("B"), 0);
+  director.reset();
+  assertEquals(director.getDoorPush("A"), 0);
+});
+
+Deno.test("stepNavMode: trailing capture bot camps the enemy door instead of hunting", () => {
+  const fresh = stepNavMode({
+    doorsOpen: false,
+    isGreyAgent: false,
+    agentAggression: 0.9,
+    bag: emptyBotBrainState(),
+    rng: () => 0.1,
+    objectiveDirective: "capture",
+    pushCapture: true,
+  });
+  assertEquals(fresh.mode, "doorCamp");
+
+  // Already hunting this closed phase, then the score drops behind.
+  const bag = emptyBotBrainState();
+  const hunt = stepNavMode({
+    doorsOpen: false,
+    isGreyAgent: false,
+    agentAggression: 0.9,
+    bag,
+    rng: () => 0.1,
+    objectiveDirective: "capture",
+  });
+  assertEquals(hunt.mode, "hunt");
+  const camp = stepNavMode({
+    doorsOpen: false,
+    isGreyAgent: false,
+    agentAggression: 0.9,
+    bag,
+    rng: () => 0.1,
+    objectiveDirective: "capture",
+    pushCapture: true,
+  });
+  assertEquals(camp.mode, "doorCamp");
+  assertEquals(bag.doorCampActive, true);
+  assertEquals(bag.huntActive, false);
 });

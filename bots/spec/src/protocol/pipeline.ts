@@ -865,11 +865,13 @@ function readPlayer(reader: Reader): PlayerSnapshot {
  * so they still decode with the trailing fields absent. An empty open-doors
  * list sets bit 1 and writes a zero count, which is not the same as leaving
  * it off. Bit 2 appends a zombots dis-rack-tor lure point. Bit 3 appends
- * per-team combatDelayMsA and combatDelayMsB.
+ * per-team combatDelayMsA and combatDelayMsB. Bit 4 appends per-team
+ * doorPushA and doorPushB.
  */
 const FRAME_OPEN_SLIDING_DOORS = 2;
 const FRAME_ZOMBIE_LURE = 4;
 const FRAME_COMBAT_DELAY = 8;
+const FRAME_DOOR_PUSH = 16;
 
 function writeFrame(writer: Writer, frame: ThinkFrame): void {
   writer.u32(frame.tick);
@@ -879,10 +881,13 @@ function writeFrame(writer: Writer, frame: ThinkFrame): void {
   const lure = frame.zombieLure;
   const hasCombatDelay = frame.combatDelayMsA !== undefined ||
     frame.combatDelayMsB !== undefined;
+  const hasDoorPush = frame.doorPushA !== undefined ||
+    frame.doorPushB !== undefined;
   let doorByte = frame.doorsOpen ? 1 : 0;
   if (openIds !== undefined) doorByte |= FRAME_OPEN_SLIDING_DOORS;
   if (lure !== undefined) doorByte |= FRAME_ZOMBIE_LURE;
   if (hasCombatDelay) doorByte |= FRAME_COMBAT_DELAY;
+  if (hasDoorPush) doorByte |= FRAME_DOOR_PUSH;
   writer.u8(doorByte);
   writer.i32(frame.doorChangeTick ?? NULL_I32);
   writer.i32(frame.teamScoreA);
@@ -905,6 +910,10 @@ function writeFrame(writer: Writer, frame: ThinkFrame): void {
   if (hasCombatDelay) {
     writer.f64(frame.combatDelayMsA ?? 0);
     writer.f64(frame.combatDelayMsB ?? 0);
+  }
+  if (hasDoorPush) {
+    writer.f64(frame.doorPushA ?? 0);
+    writer.f64(frame.doorPushB ?? 0);
   }
 }
 
@@ -940,6 +949,12 @@ function readFrame(reader: Reader): ThinkFrame {
     combatDelayMsA = reader.f64();
     combatDelayMsB = reader.f64();
   }
+  let doorPushA: number | undefined;
+  let doorPushB: number | undefined;
+  if ((doorByte & FRAME_DOOR_PUSH) !== 0) {
+    doorPushA = reader.f64();
+    doorPushB = reader.f64();
+  }
   return {
     tick,
     simDelta,
@@ -952,6 +967,8 @@ function readFrame(reader: Reader): ThinkFrame {
     ...(openSlidingDoorIds !== undefined ? { openSlidingDoorIds } : {}),
     ...(combatDelayMsA !== undefined ? { combatDelayMsA } : {}),
     ...(combatDelayMsB !== undefined ? { combatDelayMsB } : {}),
+    ...(doorPushA !== undefined ? { doorPushA } : {}),
+    ...(doorPushB !== undefined ? { doorPushB } : {}),
     ...(matchOver ? { matchOver: true } : {}),
     ...(zombieLure !== undefined ? { zombieLure } : {}),
   };

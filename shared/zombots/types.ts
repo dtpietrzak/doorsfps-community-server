@@ -43,6 +43,8 @@ export type ZombotsIntent =
     modelScale: number;
     /** Slow, tanky, hunched grandpa zombie (every `grandpaEvery`th spawn). */
     grandpa: boolean;
+    /** Tall sprinter zombie (every `tallEvery`th spawn): 15% taller, periodic sprint + pause. */
+    tall: boolean;
     meleeDamage: number;
   }
   | { kind: "waveCleared"; wave: number }

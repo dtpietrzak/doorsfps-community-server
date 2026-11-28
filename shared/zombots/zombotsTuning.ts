@@ -62,6 +62,23 @@ export const ZOMBOTS_TUNING = {
     grandpaSpeedMultiplier: 0.5,
     /** Health multiplier for a grandpa relative to normal wave zombies. */
     grandpaHealthMultiplier: 1.5,
+    /**
+     * Every Nth zombie spawned in a run (17, 34, 51, ...) is a tall sprinter
+     * (unless already a mini or grandpa).
+     */
+    tallEvery: 17,
+    /** Vertical (Y-only) height scale for a tall zombot (15% taller). */
+    tallHeightScale: 1.15,
+    /** Walk speed multiplier for a tall zombot relative to normal wave zombies. */
+    tallWalkSpeedMultiplier: 0.85,
+    /** Sprint burst speed multiplier for a tall zombot relative to normal wave zombies. */
+    tallSprintSpeedMultiplier: 1.75,
+    /** Full tall-zombot sprint/pause cycle period (ms). */
+    tallCycleMs: 7_500,
+    /** Duration (ms) of each 1.75x sprint burst inside the cycle. */
+    tallSprintDurationMs: 1_000,
+    /** Duration (ms) of the complete stop immediately after each sprint. */
+    tallPauseDurationMs: 750,
   },
 
   points: {

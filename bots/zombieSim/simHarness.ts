@@ -155,7 +155,7 @@ export function walkOneSimTick(c: MapCollision, p: SimPawn): void {
     mx += cos;
     mz -= sin;
   }
-  const len = Math.hypot(mx, mz);
+  const len = Math.sqrt(mx * mx + mz * mz);
   if (len < 1e-6) return;
   const step = HARNESS_WALK_SPEED * p.speedScale / HARNESS_SIM_HZ / len;
   const next = c.resolvePosition(p.x + mx * step, p.z + mz * step);
@@ -202,12 +202,13 @@ export function simOneTick(
       mx += cos;
       mz -= sin;
     }
-    const len = Math.hypot(mx, mz);
+    const len = Math.sqrt(mx * mx + mz * mz);
     if (len > 1e-6) {
+      const invLen = 1 / len;
       const started = tryStartWindowCrawl(
         crawl.portals,
         { x: before.x, z: before.z },
-        { x: mx / len, z: mz / len },
+        { x: mx * invLen, z: mz * invLen },
         p.id,
         crawl.tick,
       );

@@ -20,6 +20,7 @@
 
 import type { HitVec3 as Vec3 } from "./playerHitVolumes.ts";
 import type { WeaponDef } from "./weapons.ts";
+import { HALF_PI, RAD_PER_DEG, TWO_PI } from "../math/index.ts";
 
 /** Ring pellets sit at this fraction of the cone half-angle. */
 export const PELLET_RING_RADIUS_FRAC = 0.65;
@@ -28,7 +29,7 @@ export const PELLET_JITTER_RADIUS_FRAC = 0.15;
 /** Normal mode: max angular jitter (± fraction of one ring slot). */
 export const PELLET_JITTER_SLOT_FRAC = 0.25;
 /** Uniform ring starts straight up so the Hawkeyes pattern is symmetric on screen. */
-const UNIFORM_RING_START_RAD = Math.PI / 2;
+const UNIFORM_RING_START_RAD = HALF_PI;
 
 export type PelletPatternOpts = {
   /** Hawkeyes: evenly spaced ring, no rotation or jitter draws. */
@@ -50,8 +51,9 @@ export function pelletDrawCount(weapon: WeaponDef, uniform: boolean): number {
 }
 
 function normalize(v: Vec3): Vec3 {
-  const len = Math.hypot(v.x, v.y, v.z) || 1;
-  return { x: v.x / len, y: v.y / len, z: v.z / len };
+  const len = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z) || 1;
+  const inv = 1 / len;
+  return { x: v.x * inv, y: v.y * inv, z: v.z * inv };
 }
 
 /**
@@ -69,13 +71,14 @@ export function pelletDirections(
   if (count <= 1) return [dir];
 
   let right: Vec3 = { x: dir.z, y: 0, z: -dir.x };
-  let rLen = Math.hypot(right.x, right.z);
+  let rLen = Math.sqrt(right.x * right.x + right.z * right.z);
   if (rLen < 1e-6) {
     // Looking straight up/down — pick an arbitrary horizontal right.
     right = { x: 1, y: 0, z: 0 };
     rLen = 1;
   }
-  right = { x: right.x / rLen, y: 0, z: right.z / rLen };
+  const invRLen = 1 / rLen;
+  right = { x: right.x * invRLen, y: 0, z: right.z * invRLen };
   const up = normalize({
     x: right.y * dir.z - right.z * dir.y,
     y: right.z * dir.x - right.x * dir.z,
@@ -83,11 +86,11 @@ export function pelletDirections(
   });
 
   const halfAngle = Math.max(0, weapon.pelletSpreadDeg ?? 0) *
-    Math.max(0, opts.coneScale ?? 1) * (Math.PI / 180);
+    Math.max(0, opts.coneScale ?? 1) * RAD_PER_DEG;
   const ring = count - 1;
-  const slot = (Math.PI * 2) / ring;
+  const slot = (TWO_PI) / ring;
   const uniform = opts.uniform === true;
-  const rotation = uniform ? UNIFORM_RING_START_RAD : rng() * Math.PI * 2;
+  const rotation = uniform ? UNIFORM_RING_START_RAD : rng() * TWO_PI;
 
   const out: Vec3[] = [dir];
   for (let i = 0; i < ring; i++) {

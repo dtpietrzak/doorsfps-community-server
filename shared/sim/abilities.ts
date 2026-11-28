@@ -416,10 +416,16 @@ export function distPointToSegment2d(
   const abx = b.x - a.x;
   const abz = b.z - a.z;
   const ab2 = abx * abx + abz * abz;
-  if (ab2 < 1e-12) return Math.hypot(px - a.x, pz - a.z);
+  if (ab2 < 1e-12) {
+    const ex = px - a.x;
+    const ez = pz - a.z;
+    return Math.sqrt(ex * ex + ez * ez);
+  }
   let t = ((px - a.x) * abx + (pz - a.z) * abz) / ab2;
   t = Math.max(0, Math.min(1, t));
-  return Math.hypot(px - (a.x + abx * t), pz - (a.z + abz * t));
+  const fx = px - (a.x + abx * t);
+  const fz = pz - (a.z + abz * t);
+  return Math.sqrt(fx * fx + fz * fz);
 }
 
 /**

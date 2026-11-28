@@ -136,6 +136,9 @@ export class BotBrainState {
   sprintChanceHasLatch: boolean;
   openSprintChanceLatched: boolean;
   openSprintChanceHasLatch: boolean;
+  doorRushSprintLatched: boolean;
+  doorRushSprintHasLatch: boolean;
+  doorRushWinded: boolean;
 
   targetEnemyId: string;
   targetEnemyStandGround: boolean;
@@ -314,6 +317,9 @@ export class BotBrainState {
     this.sprintChanceHasLatch = false;
     this.openSprintChanceLatched = false;
     this.openSprintChanceHasLatch = false;
+    this.doorRushSprintLatched = false;
+    this.doorRushSprintHasLatch = false;
+    this.doorRushWinded = false;
 
     this.targetEnemyId = "";
     this.targetEnemyStandGround = false;
@@ -481,6 +487,9 @@ export function copyBotBrainState(
   target.sprintChanceHasLatch = source.sprintChanceHasLatch;
   target.openSprintChanceLatched = source.openSprintChanceLatched;
   target.openSprintChanceHasLatch = source.openSprintChanceHasLatch;
+  target.doorRushSprintLatched = source.doorRushSprintLatched;
+  target.doorRushSprintHasLatch = source.doorRushSprintHasLatch;
+  target.doorRushWinded = source.doorRushWinded;
 
   target.targetEnemyId = source.targetEnemyId;
   target.targetEnemyStandGround = source.targetEnemyStandGround;

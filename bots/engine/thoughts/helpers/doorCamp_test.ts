@@ -5,17 +5,21 @@ import {
   campLookHoldRangeSec,
   collectEnemyDoorCampClaims,
   DOOR_CAMP_OCCUPY_RADIUS,
+  DOOR_LIP_CAMP_SEC,
+  DOOR_PUSH_LIP_EXTRA_SEC,
   doorCampLookYaw,
   doorCampOwnDoorYaw,
   doorCampYawSignedDelta,
   enemySpawnCorners,
   isAtDoorCampPlant,
+  lipCampSecForPush,
   pickEnemyDoorCampPlant,
   rollCampLookHoldSec,
   shortestArcPassesNear,
   wantsEnemyDoorCamp,
   wantsLipDoorCamp,
 } from "./doorCamp.ts";
+import { TICK_HZ } from "../../shared/network.ts";
 import { enemyDoorSide, enemyDoorTarget } from "../../helpers/nav.ts";
 
 function openMap(): DoorsMap {
@@ -185,4 +189,20 @@ Deno.test("wantsLipDoorCamp: high aggression or last seconds of close", () => {
   assertEquals(wantsLipDoorCamp(0.3, 100, 400), false);
   assertEquals(wantsLipDoorCamp(0.3, 100, 200), true);
   assertEquals(wantsLipDoorCamp(0.3, 100, 80), false);
+});
+
+Deno.test("lipCampSecForPush grows the lip window with trailing push", () => {
+  assertEquals(lipCampSecForPush(0), DOOR_LIP_CAMP_SEC);
+  assertEquals(
+    lipCampSecForPush(1),
+    DOOR_LIP_CAMP_SEC + DOOR_PUSH_LIP_EXTRA_SEC,
+  );
+  assertEquals(
+    lipCampSecForPush(5),
+    DOOR_LIP_CAMP_SEC + DOOR_PUSH_LIP_EXTRA_SEC,
+  );
+  // 6 s before open: outside the default window, inside a full-push window.
+  const remain = 6 * TICK_HZ;
+  assertEquals(wantsLipDoorCamp(0.3, 0, remain), false);
+  assertEquals(wantsLipDoorCamp(0.3, 0, remain, lipCampSecForPush(1)), true);
 });

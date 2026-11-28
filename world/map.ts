@@ -215,14 +215,15 @@ export function doorSegment(
   const [c0, c1] = EDGE_CORNERS[side.edge];
   const p0 = cornerWorld(bounds, c0);
   const p1 = cornerWorld(bounds, c1);
-  const mx = (p0.x + p1.x) / 2;
-  const mz = (p0.z + p1.z) / 2;
+  const mx = (p0.x + p1.x) * 0.5;
+  const mz = (p0.z + p1.z) * 0.5;
   const dx = p1.x - p0.x;
   const dz = p1.z - p0.z;
-  const len = Math.hypot(dx, dz) || 1;
-  const ux = dx / len;
-  const uz = dz / len;
-  const hw = Math.min(side.doorHalfWidth, len / 2 - 0.01);
+  const len = Math.sqrt(dx * dx + dz * dz) || 1;
+  const inv = 1 / len;
+  const ux = dx * inv;
+  const uz = dz * inv;
+  const hw = Math.min(side.doorHalfWidth, len * 0.5 - 0.01);
   return [
     { x: mx - ux * hw, z: mz - uz * hw },
     { x: mx + ux * hw, z: mz + uz * hw },

@@ -1179,8 +1179,8 @@ export class GameServer implements ReplayIntegrationSinkHandle {
     const ranked = this.isRanked();
     const roster = this.players.getFullPlayerRoster(tick);
     const first = roster[0];
-    const midX = (this.map.bounds.minX + this.map.bounds.maxX) / 2;
-    const midZ = (this.map.bounds.minZ + this.map.bounds.maxZ) / 2;
+    const midX = (this.map.bounds.minX + this.map.bounds.maxX) * 0.5;
+    const midZ = (this.map.bounds.minZ + this.map.bounds.maxZ) * 0.5;
     const spawn = first ?? {
       id: `spec:${socketId}`,
       name: "Spectator",

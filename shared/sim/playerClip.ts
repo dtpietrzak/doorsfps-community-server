@@ -3,7 +3,7 @@
  * (server-community/combat/hitscan.ts, client hitVolumes.ts). Not map radius.
  */
 
-import { distance2, distanceSquared2, max } from "../math/index.ts";
+import { distanceSquared2, fastSqrt, max } from "../math/index.ts";
 import {
   MOVE_CROUCH_COLLISION_H,
   MOVE_CROUCH_EYE,
@@ -69,6 +69,7 @@ export function clipMoverAgainstObstacles(
   let z = mover.z;
   const r = PLAYER_CLIP_RADIUS;
   const minSep = 2 * r;
+  const minSepSq = minSep * minSep;
   const moverCrouch = Boolean(mover.crouch);
 
   for (const other of obstacles) {
@@ -76,8 +77,9 @@ export function clipMoverAgainstObstacles(
     if (!bodyHitboxesOverlapY(mover.y, moverCrouch, other)) continue;
     const dx = x - other.x;
     const dz = z - other.z;
-    const dist = distance2(dx, dz);
-    if (!(dist < minSep)) continue;
+    const distSq = distanceSquared2(dx, dz);
+    if (!(distSq < minSepSq)) continue;
+    const dist = fastSqrt(distSq);
     if (dist < 1e-8) {
       const dir = coincidentPushSign(mover.id, other.id);
       x = other.x + dir * minSep;

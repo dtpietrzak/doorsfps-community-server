@@ -13,6 +13,7 @@ import {
   playerHitAnimation,
   playerLandingHitAmount,
   rayHitVolume,
+  STAND_EYE_HEIGHT,
   type HitVec3,
   type HitVolume,
 } from "./playerHitVolumes.ts";
@@ -200,4 +201,33 @@ Deno.test("explicit preview transforms override derived locomotion lean", () => 
   assertAlmostEquals(animation.upperPitch, 0.15, 1e-9);
   assertAlmostEquals(animation.upperRoll, 0.08, 1e-9);
   assertEquals(animation.rigOffset, { x: 1, y: 2, z: 3 });
+});
+
+Deno.test("scaleY stretches head and body height from feet without widening X/Z", () => {
+  const feetY = 0;
+  const eyeY = STAND_EYE_HEIGHT;
+  const normal = getPlayerHitVolumes({ x: 0, y: eyeY, z: 0, onGround: true });
+  const tall = getPlayerHitVolumes({
+    x: 0,
+    y: eyeY,
+    z: 0,
+    onGround: true,
+    scaleY: 1.15,
+  });
+  assertAlmostEquals(
+    tall.head.center.y - feetY,
+    (normal.head.center.y - feetY) * 1.15,
+    1e-9,
+  );
+  assertAlmostEquals(tall.head.yAxis.y, normal.head.yAxis.y * 1.15, 1e-9);
+  assertAlmostEquals(tall.head.xAxis.x, normal.head.xAxis.x, 1e-9);
+  assertAlmostEquals(tall.head.zAxis.z, normal.head.zAxis.z, 1e-9);
+  assertAlmostEquals(
+    tall.body.center.y - feetY,
+    (normal.body.center.y - feetY) * 1.15,
+    1e-9,
+  );
+  assertAlmostEquals(tall.body.yAxis.y, normal.body.yAxis.y * 1.15, 1e-9);
+  assertAlmostEquals(tall.body.xAxis.x, normal.body.xAxis.x, 1e-9);
+  assertAlmostEquals(tall.body.zAxis.z, normal.body.zAxis.z, 1e-9);
 });

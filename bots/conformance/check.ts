@@ -264,7 +264,7 @@ export async function runConformance(
       });
     if (!await synchronize()) return finish();
 
-    const respawnTick = botTickToSimTick(30 + Math.floor(periods / 2));
+    const respawnTick = botTickToSimTick(30 + Math.floor(periods * 0.5));
     const firstTick = botTickToSimTick(30);
     const lastTick = firstTick + periods * SIM_TICKS_PER_BOT_TICK;
     for (let tick = firstTick; tick < lastTick; tick++) {
@@ -353,7 +353,7 @@ export async function runConformance(
         if (problem) failures.push(`${where}: ${decision.botId}: ${problem}`);
       });
     }
-    if (batches > 0 && lateBatches > batches / 10) {
+    if (batches > 0 && lateBatches > batches * 0.1) {
       failures.push(
         `${lateBatches} of ${batches} replies took ${BUDGET_MS} ms or more (the host drops those)`,
       );

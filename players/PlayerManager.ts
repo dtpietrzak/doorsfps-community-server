@@ -27,6 +27,7 @@ import {
   type SkillProductId,
 } from "../shared/sim/skills.ts";
 import { rollDamageVariation } from "../shared/sim/game.ts";
+import { isTallZombotId } from "../shared/zombots/tallZombot.ts";
 import { ZOMBOTS_TUNING } from "../shared/zombots/zombotsTuning.ts";
 import {
   createMatchSimRngStreams,
@@ -114,6 +115,7 @@ import {
   deriveReadyVoteClearAll,
   deriveTeamAssign,
 } from "./authoritativeEventDerive.ts";
+import { HALF_PI } from "../shared/math/index.ts";
 
 export type DamageOutcome = {
   targetId: string;
@@ -2452,8 +2454,8 @@ export class PlayerManager {
       shooter.yaw = packet.yaw;
       shooter.pitch = clamp(
         packet.pitch,
-        -Math.PI / 2 + 0.01,
-        Math.PI / 2 - 0.01,
+        -HALF_PI + 0.01,
+        HALF_PI - 0.01,
       );
     }
 
@@ -2793,6 +2795,9 @@ export class PlayerManager {
         slot.pose.onGround = pose.onGround;
         slot.pose.landingAmount = pose.landingAmount;
         slot.pose.scale = p.modelScale;
+        slot.pose.scaleY = isTallZombotId(p.id)
+          ? ZOMBOTS_TUNING.zombie.tallHeightScale
+          : 1;
         targetCount += 1;
       }
     }
@@ -2842,8 +2847,8 @@ export class PlayerManager {
       attacker.yaw = packet.yaw;
       attacker.pitch = clamp(
         packet.pitch,
-        -Math.PI / 2 + 0.01,
-        Math.PI / 2 - 0.01,
+        -HALF_PI + 0.01,
+        HALF_PI - 0.01,
       );
     }
 
@@ -3918,7 +3923,7 @@ function resolveShootOrigin(
   const dx = ox - serverEye.x;
   const dy = oy - serverEye.y;
   const dz = oz - serverEye.z;
-  const err = Math.hypot(dx, dy, dz);
+  const err = Math.sqrt(dx * dx + dy * dy + dz * dz);
   if (err <= SHOOT_ORIGIN_MAX_ERROR) {
     return { x: ox, y: oy, z: oz };
   }

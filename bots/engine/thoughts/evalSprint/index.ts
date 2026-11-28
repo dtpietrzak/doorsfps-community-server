@@ -6,6 +6,11 @@
  *    the score door) + stamina &gt; 50% + same `sprintChance` latch (separate
  *    open entry latch). ≤ half bar → no open sprint (zone/force/slide ok).
  *
+ * 0. **Door rush** — doors open + path mode (running the open door, not
+ *    hunting / camping / defending): lenient door-run + clear lane, one
+ *    `sprintChance + 0.45` roll per open window, drains the bar to ~12% then
+ *    walks to ~45% before sprinting again. Checked before zone/open.
+ *
  * Never sprint while move has no progress toward the door. Duck still forces
  * sprint false in navigate.
  *
@@ -15,8 +20,10 @@
  */
 
 import {
+  doorRushSprintChance,
   isMoveTowardEnemyDoor,
   OPEN_SPRINT_CHANCE_SCALE,
+  stepEvalDoorRushSprint,
   stepEvalOpenSprint,
   stepEvalSprint,
 } from "./helpers/evalSprint.ts";
@@ -34,7 +41,7 @@ import {
   SPRINT_CHANCE_LATCH_KEY,
 } from "../helpers/stateKeys.ts";
 import { clamp01 } from "../../math/index.ts";
-import type { BotBrainState } from "../../types.ts";
+import { type BotBrainState, capturePush } from "../../types.ts";
 
 export type EvalSprintStepOpts = {
   sprint: boolean;
@@ -85,6 +92,33 @@ export function runEvalSprintStep(
         enemyDoor: ctx.perception?.enemyDoor,
       };
       const towardDoor = isMoveTowardEnemyDoor(doorRun);
+      // Doors-open rush (path mode only — hunt/camp/defend keep old rules;
+      // navMode already wrote the mode flags onto the bag this think).
+      const rushWindow = Boolean(ctx.perception?.doorsOpen) &&
+        !bag.huntActive && !bag.doorCampActive && !sprint;
+      let rushWant = false;
+      if (rushWindow && ctx.view.collision) {
+        const push = capturePush(ctx.view);
+        const rush = stepEvalDoorRushSprint({
+          ...doorRun,
+          collision: ctx.view.collision,
+          sprintStamina: me.sprintStamina,
+          winded: bag.doorRushWinded,
+          push,
+        });
+        bag.doorRushWinded = rush.winded;
+        if (!bag.doorRushSprintHasLatch) {
+          // One roll per open window (not per stamina dip).
+          const c = doorRushSprintChance(sprintChance, push);
+          bag.doorRushSprintLatched = c >= 1 || (c > 0 && rng() < c);
+          bag.doorRushSprintHasLatch = true;
+        }
+        rushWant = rush.want && bag.doorRushSprintLatched;
+      } else if (!rushWindow) {
+        bag.doorRushSprintLatched = false;
+        bag.doorRushSprintHasLatch = false;
+        bag.doorRushWinded = false;
+      }
       // Zone + strict door FOV.
       const zoneWant = stepEvalSprint(doorRun);
       // Open lane + lenient door-run + stamina gate (zone/force ignore this).
@@ -102,6 +136,8 @@ export function runEvalSprintStep(
         bag.sprintChanceHasLatch = false;
         bag.openSprintChanceLatched = false;
         bag.openSprintChanceHasLatch = false;
+        wantSprint = true;
+      } else if (rushWant) {
         wantSprint = true;
       } else if (zoneWant) {
         bag.openSprintChanceLatched = false;

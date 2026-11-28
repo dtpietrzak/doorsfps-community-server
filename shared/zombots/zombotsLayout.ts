@@ -15,7 +15,7 @@
  */
 
 import { MOVE_PLAYER_RADIUS } from "../sim/moveStep.ts";
-import { distance2, min, round } from "../math/index.ts";
+import { distance2, distanceSquared2, min, round } from "../math/index.ts";
 import {
   type ZombotsDoorMap,
   ZOMBOTS_ROOM_CELL,
@@ -506,12 +506,13 @@ function wallSides(
   const dz = wall.b.z - wall.a.z;
   const len = distance2(dx, dz);
   if (len < 1e-6) return null;
-  const ux = dx / len;
-  const uz = dz / len;
+  const invLen = 1 / len;
+  const ux = dx * invLen;
+  const uz = dz * invLen;
   const s = (center.x - wall.a.x) * ux + (center.z - wall.a.z) * uz;
   if (s < -CENTER_ON_WALL || s > len + CENTER_ON_WALL) return null;
   const p = { x: wall.a.x + ux * s, z: wall.a.z + uz * s };
-  if (distance2(center.x - p.x, center.z - p.z) > CENTER_ON_WALL) return null;
+  if (distanceSquared2(center.x - p.x, center.z - p.z) > CENTER_ON_WALL * CENTER_ON_WALL) return null;
   return { p, n: { x: -uz, z: ux } };
 }
 

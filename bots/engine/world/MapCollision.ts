@@ -1251,8 +1251,9 @@ function rayAabbLocal(
       if (o < -h || o > h) return null;
       continue;
     }
-    let t1 = (-h - o) / d;
-    let t2 = (h - o) / d;
+    const invD = 1 / d;
+    let t1 = (-h - o) * invD;
+    let t2 = (h - o) * invD;
     if (t1 > t2) {
       const tmp = t1;
       t1 = t2;

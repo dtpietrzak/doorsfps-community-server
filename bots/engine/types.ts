@@ -71,7 +71,23 @@ export type BotWorldView = {
   combatDelayMs?: number;
   /** Per-bot dynamic arena objective role (`capture` | `defend` | `slay`). */
   objectiveDirective?: BotObjectiveDirective;
+  /**
+   * Per-team trailing door push (0..1) for this bot's team. Only acted on by
+   * `capture` bots — see {@link capturePush}.
+   */
+  doorPush?: number;
 };
+
+/**
+ * Effective door push for this think: `view.doorPush` clamped to 0..1 when
+ * this bot holds the `capture` objective, else 0.
+ */
+export function capturePush(view: BotWorldView): number {
+  if (view.objectiveDirective !== "capture") return 0;
+  const p = view.doorPush;
+  if (typeof p !== "number" || !Number.isFinite(p) || p <= 0) return 0;
+  return p >= 1 ? 1 : p;
+}
 
 /** One sim tick of look inside a bot period (see {@link BotAction.lookSamples}). */
 export type BotLookSample = { yaw: number; pitch: number };

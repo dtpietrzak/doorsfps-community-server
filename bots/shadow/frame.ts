@@ -242,6 +242,8 @@ export function buildThinkFrame(
     teamScoreB: number;
     combatDelayMsA?: number;
     combatDelayMsB?: number;
+    doorPushA?: number;
+    doorPushB?: number;
     objectiveDirectiveFor?: (playerId: string) => BotObjectiveDirective | undefined;
     matchOver?: boolean;
   }>,
@@ -259,6 +261,8 @@ export function buildThinkFrame(
   }
   const hasCombatDelay = (input.combatDelayMsA ?? 0) > 0 ||
     (input.combatDelayMsB ?? 0) > 0;
+  const hasDoorPush = (input.doorPushA ?? 0) > 0 ||
+    (input.doorPushB ?? 0) > 0;
   return {
     tick: input.tick,
     simDelta: input.simDelta,
@@ -271,6 +275,12 @@ export function buildThinkFrame(
       ? {
         combatDelayMsA: input.combatDelayMsA ?? 0,
         combatDelayMsB: input.combatDelayMsB ?? 0,
+      }
+      : {}),
+    ...(hasDoorPush
+      ? {
+        doorPushA: input.doorPushA ?? 0,
+        doorPushB: input.doorPushB ?? 0,
       }
       : {}),
     players,
